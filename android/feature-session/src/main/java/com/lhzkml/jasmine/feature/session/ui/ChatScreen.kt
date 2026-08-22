@@ -440,18 +440,17 @@ private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
 
 /**
  * Scrolls to the newest line with its bottom edge snapped to the viewport
- * bottom, so a growing reply's latest text stays readable. A normal
- * [LazyListState.scrollToItem] only aligns the item's top, which strands the
- * live tail below the fold once a reply outgrows the screen.
+ * bottom. The snap is instantaneous on purpose: a stream delivers deltas far
+ * faster than an animation can finish, and animating each one restarts the
+ * previous animation — which reads as the jumpy stutter we had. Riding to the
+ * end is a no-op when already there, so per-delta calls are cheap.
  */
 private suspend fun LazyListState.scrollToBottom() {
     val total = layoutInfo.totalItemsCount
     if (total == 0) return
-    animateScrollToItem(total - 1)
+    scrollToItem(total - 1)
     scroll {
-        val last = layoutInfo.visibleItemsInfo.firstOrNull { it.index == total - 1 } ?: return@scroll
-        val beyond = (last.offset + last.size) - layoutInfo.viewportSize.height
-        if (beyond > 0) scrollBy(beyond.toFloat())
+        scrollBy(Float.MAX_VALUE)
     }
 }
 
