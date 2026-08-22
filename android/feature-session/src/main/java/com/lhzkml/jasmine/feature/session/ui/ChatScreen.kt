@@ -439,25 +439,29 @@ private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
 }
 
 /**
- * Follows the newest line only while the user is already at the tail; once
- * they scroll away to read history, the follow pauses until they return.
+ * Follows the newest line only while the user is near the tail — within
+ * [quitFraction] of a viewport height of it. Scrolling up to read earlier
+ * content (the newest line's bottom far below the fold) pauses the follow
+ * until the user comes back down; a manual scroll to the bottom resumes it
+ * automatically.
  *
  * The scroll distance is measured, never guessed: the newest visible line's
  * bottom edge vs the viewport bottom, so each delta moves exactly the pixels
  * the growing line pushed past the fold. No [LazyListState.scrollToItem]
- * (it aligns a tall line's TOP to the viewport top — the jump-back bug), no
- * giant scrollBy values (Int overflow clamps the position to zero — the
- * stuck-at-first-screen bug), and nothing to loop.
+ * (it aligns a tall line's TOP to the viewport top — the jump-back bug) and
+ * no giant scrollBy values (Int overflow clamps the position to zero — the
+ * stuck-at-first-screen bug).
  */
-private suspend fun LazyListState.followTail() {
+private suspend fun LazyListState.followTail(quitFraction: Float = 0.25f) {
     val info = layoutInfo
     val total = info.totalItemsCount
     if (total == 0) return
     // The newest line must be at least partially visible; when the viewport
-    // bottom shows only older lines the user is reading history — hold still.
+    // shows only older lines the user is reading history — hold still.
     val last = info.visibleItemsInfo.lastOrNull { it.index == total - 1 } ?: return
     val beyond = (last.offset + last.size) - info.viewportSize.height
-    if (beyond > 0) {
-        scroll { scrollBy(beyond.toFloat()) }
-    }
+    // Far from the bottom (beyond the quit fraction): the user is reading
+    // earlier content — hold still until they scroll back to the tail.
+    if (beyond <= 0 || beyond > (info.viewportSize.height * quitFraction).toInt()) return
+    scroll { scrollBy(beyond.toFloat()) }
 }
