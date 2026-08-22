@@ -311,12 +311,13 @@ private fun ChatInputBar(
             .navigationBarsPadding()
             .imePadding()
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        // 20dp keeps the pill look without the bubble-round 28dp.
-        shape = RoundedCornerShape(20.dp),
+        // 12dp: a light rounding, not a pill; the box keeps a clear edge.
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        // Bottom padding is small so the action row sits near the box's edge.
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        // Bottom padding is a hairline only, so the action row hugs the box's
+        // bottom edge while the text area keeps breathing room on top.
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)) {
             // Taller text area; the box itself spans the full width.
             BasicTextField(
                 value = draft,
@@ -368,15 +369,23 @@ private fun ChatInputBar(
                         }
                     }
                 }
-                Button(
-                    onClick = onSend,
-                    enabled = sendEnabled,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.padding(start = 8.dp),
+                // Send mirrors the model chip exactly (same radius, type scale
+                // and padding) so the two sit flush on one baseline; the only
+                // difference is the filled color, which greys out when disabled.
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (sendEnabled) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .clickable(enabled = sendEnabled) { onSend() },
                 ) {
                     Text(
                         stringResource(R.string.chat_send),
-                        style = MaterialTheme.typography.labelLarge,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (sendEnabled) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                 }
             }
