@@ -60,11 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -98,26 +94,16 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    // Real gesture detection for the follow toggle: only UserInput scrolls
-    // flip it, so the follow's own programmatic scrolling can never be
-    // mistaken for the user leaving the tail. Leaving is instant (any
-    // history-ward drag, however small); coming back is explicit — the user
-    // taps the jump-to-latest FAB (or sends a new message), nothing else.
+    // Streaming follow, decided purely by position — no gesture events to
+    // miss. After each follow scroll the list position is recorded as the
+    // baseline. Content growth anchors the first visible item (no drift) and
+    // the follow's own scrolls only move the position down while refreshing
+    // the baseline, so the position can drift UP between two deltas only
+    // when the user scrolled up: that alone pauses the follow. Resuming is
+    // explicit — the jump button or sending a message.
     var followEnabled by remember { mutableStateOf(true) }
-    // Position baseline right after each follow scroll; an increment that
-    // finds the list above it means the user scrolled up.
     var lastTailIndex by remember { mutableStateOf(-1) }
     var lastTailOffset by remember { mutableStateOf(0) }
-    val followToggle = remember {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.UserInput && available.y < 0f) {
-                    followEnabled = false
-                }
-                return Offset.Zero
-            }
-        }
-    }
 
     // Reload the model picker whenever this screen re-enters composition,
     // so providers added in settings appear without restarting the app.
@@ -128,25 +114,27 @@ fun ChatScreen(
         if (scrollTarget > 0 && followEnabled) listState.followTail()
     }
 
-    // Follow the live reply while the stream advances — unless the user's
-    // gesture (or a net position drift up from the last follow baseline,
-    // which catches any gesture the nested-scroll hook missed) paused it.
+    // Per-delta follow decision, position-based and deterministic: if the
+    // list sits above the last follow's baseline the user scrolled up —
+    // pause (button appears); otherwise ride the tail and refresh the
+    // baseline.
     LaunchedEffect(state.streamingText, state.streamingReasoning) {
         val hasLive = state.sending &&
             (!state.streamingText.isNullOrEmpty() || !state.streamingReasoning.isNullOrEmpty())
-        if (!hasLive) return@LaunchedEffect
+        if (!hasLive || !followEnabled) return@LaunchedEffect
         if (lastTailIndex >= 0) {
             val curIndex = listState.firstVisibleItemIndex
             val curOffset = listState.firstVisibleItemScrollOffset
-            val movedUp = curIndex < lastTailIndex ||
+            if (curIndex < lastTailIndex ||
                 (curIndex == lastTailIndex && curOffset < lastTailOffset - 16)
-            if (movedUp) followEnabled = false
+            ) {
+                followEnabled = false
+                return@LaunchedEffect
+            }
         }
-        if (followEnabled) {
-            listState.followTail()
-            lastTailIndex = listState.firstVisibleItemIndex
-            lastTailOffset = listState.firstVisibleItemScrollOffset
-        }
+        listState.followTail()
+        lastTailIndex = listState.firstVisibleItemIndex
+        lastTailOffset = listState.firstVisibleItemScrollOffset
     }
 
     Scaffold(
@@ -190,7 +178,7 @@ fun ChatScreen(
         Box(Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().nestedScroll(followToggle),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
