@@ -49,6 +49,48 @@ kotlin {
     }
 }
 
+// ---------------------------------------------------------------------------
+// UniFFI Kotlin bindings: generated from the Rust cdylib instead of checked
+// in. Requires a Rust toolchain (cargo) on the build machine; runs before
+// every build so a fresh clone compiles without committed bindings.
+// ---------------------------------------------------------------------------
+val rustDir = rootProject.file("../rust")
+val hostLibName = if (System.getProperty("os.name", "").lowercase().contains("win")) {
+    "ffi.dll"
+} else {
+    "libffi.so"
+}
+
+val cargoBuildHostLib by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the host Rust cdylib that UniFFI bindings are generated from"
+    workingDir = rustDir
+    commandLine("cargo", "build", "--release", "-p", "ffi")
+}
+
+val generateBindings by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Regenerate Rust UniFFI Kotlin bindings (com.lhzkml.jasmine.rust) from the host cdylib"
+    dependsOn(cargoBuildHostLib)
+    workingDir = rustDir
+    commandLine(
+        "cargo", "run", "--release", "-p", "uniffi-bindgen", "--",
+        "generate", "--library", "$rustDir/target/release/$hostLibName",
+        "--language", "kotlin",
+        "--out-dir", layout.projectDirectory.dir("src/main/java").asFile.absolutePath,
+    )
+}
+
+val generateUniffiBindings by tasks.registering {
+    group = "build"
+    description = "Ensures the UniFFI Kotlin bindings are regenerated before compilation"
+    dependsOn(generateBindings)
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(generateUniffiBindings)
+}
+
 dependencies {
     implementation(project(":core-database"))
     api(project(":core-kernel"))
