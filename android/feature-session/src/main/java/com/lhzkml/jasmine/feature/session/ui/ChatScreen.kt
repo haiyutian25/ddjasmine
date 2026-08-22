@@ -28,6 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
@@ -52,6 +54,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,6 +73,7 @@ import com.lhzkml.jasmine.core.ui.InkBlack
 import com.lhzkml.jasmine.feature.session.R
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.launch
 
 /**
  * The chat page over the live transcript. User messages read right,
@@ -91,23 +95,19 @@ fun ChatScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     // Real gesture detection for the follow toggle: only UserInput scrolls
     // flip it, so the follow's own programmatic scrolling can never be
     // mistaken for the user leaving the tail. Leaving is instant (any
-    // history-ward drag, however small); coming back requires the user's
-    // gesture to actually land on the very bottom — releasing mid-list
-    // stays put where the finger left it.
+    // history-ward drag, however small); coming back is explicit — the user
+    // taps the jump-to-latest FAB (or sends a new message), nothing else.
     var followEnabled by remember { mutableStateOf(true) }
     val followToggle = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.UserInput) {
-                    if (available.y < 0f) {
-                        followEnabled = false
-                    } else if (!listState.canScrollForward) {
-                        followEnabled = true
-                    }
+                if (source == NestedScrollSource.UserInput && available.y < 0f) {
+                    followEnabled = false
                 }
                 return Offset.Zero
             }
@@ -208,6 +208,24 @@ fun ChatScreen(
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.align(Alignment.Center).padding(8.dp),
                 )
+            }
+            // Jump-to-latest: shown once the user's gesture paused the follow;
+            // tapping rides to the newest line and re-enables auto-follow.
+            if (!followEnabled) {
+                FloatingActionButton(
+                    onClick = {
+                        followEnabled = true
+                        scope.launch { listState.scrollToBottomNow() }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 16.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowDown,
+                        contentDescription = "回到底部",
+                    )
+                }
             }
         }
     }
@@ -492,4 +510,18 @@ private suspend fun LazyListState.followTail() {
     if (beyond > 0) {
         scroll { scrollBy(beyond.toFloat()) }
     }
+}
+
+/**
+ * The jump behind the jump-to-latest button: brings the newest line into
+ * view instantly (its top aligned first when it is far off-screen), then
+ * rides its bottom edge flush with the viewport bottom.
+ */
+private suspend fun LazyListState.scrollToBottomNow() {
+    val total = layoutInfo.totalItemsCount
+    if (total == 0) return
+    if (layoutInfo.visibleItemsInfo.none { it.index == total - 1 }) {
+        scrollToItem(total - 1)
+    }
+    followTail()
 }
