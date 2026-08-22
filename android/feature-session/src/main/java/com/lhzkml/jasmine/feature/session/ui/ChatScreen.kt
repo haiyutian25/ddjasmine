@@ -96,21 +96,6 @@ fun ChatScreen(
         if (scrollTarget > 0) listState.animateScrollToItem(scrollTarget - 1)
     }
 
-    // Follow the live reply: each streaming delta grows the text, so scroll
-    // to the newest line whenever the stream advances — but only when the
-    // user is already at the tail, never yanking them out of history.
-    LaunchedEffect(state.streamingText, state.streamingReasoning) {
-        val hasLive = state.sending &&
-            (!state.streamingText.isNullOrEmpty() || !state.streamingReasoning.isNullOrEmpty())
-        if (!hasLive) return@LaunchedEffect
-        val total = listState.layoutInfo.totalItemsCount
-        if (total == 0) return@LaunchedEffect
-        val atTail = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-            ?.let { it.index >= total - 1 } ?: true
-        if (!atTail) return@LaunchedEffect
-        listState.scrollToItem(total - 1)
-    }
-
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -148,8 +133,13 @@ fun ChatScreen(
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
+            // reverseLayout is the chat standard: the newest line anchors to
+            // the viewport bottom, so a growing stream keeps the latest text
+            // in view by itself — no per-delta scrolling needed, and a manual
+            // scroll up into history is never yanked back down.
             LazyColumn(
                 state = listState,
+                reverseLayout = true,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
