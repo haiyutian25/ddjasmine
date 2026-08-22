@@ -301,7 +301,7 @@ private fun ChatInputBar(
     modelOptions: List<ModelOption>,
     onSelectModel: (ModelOption) -> Unit,
 ) {
-    Row(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
             // navigationBarsPadding keeps the bar above the gesture area;
@@ -310,47 +310,47 @@ private fun ChatInputBar(
             .navigationBarsPadding()
             .imePadding()
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Bottom,
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        // The rounded box IS the input field: no wrapping card around it.
-        Surface(
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer,
-        ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                BasicTextField(
-                    value = draft,
-                    onValueChange = onDraftChange,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 24.dp),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        color = MaterialTheme.colorScheme.onSurface,
-                    ),
-                    decorationBox = { inner ->
-                        if (draft.isEmpty()) {
-                            Text(
-                                stringResource(R.string.chat_hint),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        inner()
-                    },
-                )
-                // Bottom-right inside the field: the model selector.
-                Box(Modifier.fillMaxWidth().padding(top = 2.dp)) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            // Taller text area; the box itself spans the full width.
+            BasicTextField(
+                value = draft,
+                onValueChange = onDraftChange,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 32.dp),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                decorationBox = { inner ->
+                    if (draft.isEmpty()) {
+                        Text(
+                            stringResource(R.string.chat_hint),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    inner()
+                },
+            )
+            // Bottom row inside the box, right side: model selector then send.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box {
                     var menuOpen by remember { mutableStateOf(false) }
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        modifier = Modifier.align(Alignment.CenterEnd).clickable { menuOpen = true },
+                        modifier = Modifier.clickable { menuOpen = true },
                     ) {
                         Text(
                             activeModel ?: "选择模型",
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         )
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -365,10 +365,18 @@ private fun ChatInputBar(
                         }
                     }
                 }
+                Button(
+                    onClick = onSend,
+                    enabled = sendEnabled,
+                    modifier = Modifier.padding(start = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.chat_send),
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+                }
             }
-        }
-        Button(onClick = onSend, enabled = sendEnabled) {
-            Text(stringResource(R.string.chat_send))
         }
     }
 }
