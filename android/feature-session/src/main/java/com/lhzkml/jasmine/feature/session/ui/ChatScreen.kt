@@ -56,8 +56,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -89,11 +92,21 @@ fun ChatScreen(
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    // Follow pauses once the user has scrolled up roughly a finger-width
-    // (~1cm / 64dp): moving even a little to read earlier content stops the
-    // auto-scroll until they come back to the bottom.
-    val density = LocalDensity.current
-    val followPausePx = (64 * density.density).toInt()
+    // Real gesture detection for the follow toggle: only UserInput scrolls
+    // flip it, so the follow's own programmatic scrolling can never be
+    // mistaken for the user leaving the tail. A drag toward history pauses
+    // the follow instantly; a drag toward the bottom resumes it.
+    var followEnabled by remember { mutableStateOf(true) }
+    val followToggle = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput) {
+                    followEnabled = available.y > 0f
+                }
+                return Offset.Zero
+            }
+        }
+    }
 
     // Reload the model picker whenever this screen re-enters composition,
     // so providers added in settings appear without restarting the app.
@@ -101,16 +114,20 @@ fun ChatScreen(
 
     val scrollTarget = state.entries.size + if (state.sending) 1 else 0
     LaunchedEffect(scrollTarget) {
-        if (scrollTarget > 0) listState.followTail(followPausePx)
+        if (scrollTarget > 0) {
+            // Sending a message is intent to watch the reply: force the
+            // follow back on even if the user had scrolled away before.
+            followEnabled = true
+            listState.followTail()
+        }
     }
 
-    // Follow the live reply while the stream advances, but only when the user
-    // is at the newest line — a manual scroll up into history pauses the
-    // follow until they come back to the bottom.
+    // Follow the live reply while the stream advances — unless the user's
+    // own gesture has switched the follow off to read earlier content.
     LaunchedEffect(state.streamingText, state.streamingReasoning) {
         val hasLive = state.sending &&
             (!state.streamingText.isNullOrEmpty() || !state.streamingReasoning.isNullOrEmpty())
-        if (hasLive) listState.followTail(followPausePx)
+        if (hasLive && followEnabled) listState.followTail()
     }
 
     Scaffold(
@@ -152,7 +169,7 @@ fun ChatScreen(
         Box(Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().nestedScroll(followToggle),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -446,10 +463,10 @@ private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
 }
 
 /**
- * Follows the newest line only while the user is at the tail: scrolling up
- * even a finger-width ([pausePx], ~1cm) to read earlier content pauses the
- * follow until the user scrolls back down; a manual scroll to the bottom
- * resumes it automatically.
+ * Rides the newest line's bottom edge to the viewport bottom. Whether to
+ * follow at all is decided by the user's gesture ([followToggle] switches
+ * it), never by distance: the follow's own programmatic scrolling cannot
+ * re-trigger the toggle, so no amount of streaming growth disables it.
  *
  * The scroll distance is measured, never guessed: the newest visible line's
  * bottom edge vs the viewport bottom, so each delta moves exactly the pixels
@@ -458,7 +475,7 @@ private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
  * no giant scrollBy values (Int overflow clamps the position to zero — the
  * stuck-at-first-screen bug).
  */
-private suspend fun LazyListState.followTail(pausePx: Int) {
+private suspend fun LazyListState.followTail() {
     val info = layoutInfo
     val total = info.totalItemsCount
     if (total == 0) return
@@ -466,8 +483,7 @@ private suspend fun LazyListState.followTail(pausePx: Int) {
     // shows only older lines the user is reading history — hold still.
     val last = info.visibleItemsInfo.lastOrNull { it.index == total - 1 } ?: return
     val beyond = (last.offset + last.size) - info.viewportSize.height
-    // More than a finger-width past the bottom: the user is reading earlier
-    // content — hold still until they scroll back to the tail.
-    if (beyond <= 0 || beyond > pausePx) return
-    scroll { scrollBy(beyond.toFloat()) }
+    if (beyond > 0) {
+        scroll { scrollBy(beyond.toFloat()) }
+    }
 }
