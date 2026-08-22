@@ -440,15 +440,14 @@ private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
 
 /**
  * Scrolls to the newest line with its bottom edge snapped to the viewport
- * bottom. The snap is instantaneous on purpose: a stream delivers deltas far
- * faster than an animation can finish, and animating each one restarts the
- * previous animation — which reads as the jumpy stutter we had. Riding to the
- * end is a no-op when already there, so per-delta calls are cheap.
+ * bottom. Never calls [LazyListState.scrollToItem] here: for a line taller
+ * than the viewport that call aligns the item's TOP to the viewport top —
+ * the view would jump back up to the over-the-fold position on every delta,
+ * then scrollBy rides down again, which is exactly the back-and-forth
+ * jumping we had. Riding to the end is a no-op when already there.
  */
 private suspend fun LazyListState.scrollToBottom() {
-    val total = layoutInfo.totalItemsCount
-    if (total == 0) return
-    scrollToItem(total - 1)
+    if (layoutInfo.totalItemsCount == 0) return
     scroll {
         scrollBy(Float.MAX_VALUE)
     }
