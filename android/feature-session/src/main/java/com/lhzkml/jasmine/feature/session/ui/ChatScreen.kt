@@ -316,25 +316,33 @@ private fun ChatInputBar(
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         // Bottom padding is a hairline only, so the action row hugs the box's
-        // bottom edge while the text area keeps breathing room on top.
-        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)) {
-            // Taller text area; the box itself spans the full width.
+        // bottom edge; top padding plus vertical centering push the text
+        // (and the placeholder) down off the box's top edge.
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)) {
+            // Taller text area; the box itself spans the full width. The
+            // decoration Box centers the caret and placeholder vertically, so
+            // single-line text sits mid-area instead of hugging the top edge.
             BasicTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 32.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                     color = MaterialTheme.colorScheme.onSurface,
                 ),
                 decorationBox = { inner ->
-                    if (draft.isEmpty()) {
-                        Text(
-                            stringResource(R.string.chat_hint),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        if (draft.isEmpty()) {
+                            Text(
+                                stringResource(R.string.chat_hint),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        inner()
                     }
-                    inner()
                 },
             )
             // Bottom row inside the box, right side: model selector then send.
