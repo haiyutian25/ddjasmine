@@ -45,7 +45,7 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text("自定义供应商", style = MaterialTheme.typography.titleMedium)
+                        Text("模型供应商", style = MaterialTheme.typography.titleMedium)
                         Text(">", color = MaterialTheme.colorScheme.secondary)
                     }
                 }

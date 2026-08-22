@@ -12,11 +12,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * The bound custom provider. Jasmine has no built-in provider and no mock
- * fallback: chatting before a complete connection is configured fails with
- * an actionable error and sends no request. Every provider response is
- * traced verbatim through [ProviderTrace] so raw streaming (or its absence)
- * and thinking deltas are inspectable in Downloads.
+ * The bound provider seam over the stored provider list: chat uses the
+ * active provider's first selected model. Jasmine has no built-in provider
+ * and no mock fallback — an unconfigured or model-less active provider
+ * fails with an actionable error.
  */
 @Singleton
 class ConfigurableLlmService @Inject constructor(
@@ -28,25 +27,34 @@ class ConfigurableLlmService @Inject constructor(
         ProviderTrace.start(context)
     }
 
-    private fun configOf(settings: ProviderSettings): CustomProviderConfig {
-        if (!settings.isConfigured) {
-            throw LlmProviderException("请先在设置中配置 API 地址、协议、模型和上下文长度")
-        }
+    /** The active provider, or the first one when nothing is pinned. */
+    suspend fun activeProvider(): ProviderEntry {
+        val all = settingsStore.providers()
+        if (all.isEmpty()) throw LlmProviderException("请先在设置中添加模型供应商")
+        val activeId = settingsStore.activeProviderId()
+        return all.firstOrNull { it.id == activeId } ?: all.first()
+    }
+
+    private fun configOf(entry: ProviderEntry): CustomProviderConfig {
+        val model = entry.models.firstOrNull()
+        if (entry.apiAddress.isBlank()) throw LlmProviderException("供应商「${entry.name}」缺少 API 地址")
+        if (model.isNullOrBlank()) throw LlmProviderException("供应商「${entry.name}」未选择模型")
+        if (entry.contextLength <= 0) throw LlmProviderException("供应商「${entry.name}」缺少上下文长度")
         return CustomProviderConfig(
-            apiAddress = settings.apiAddress.trim(),
-            apiKey = settings.apiKey.trim(),
-            model = settings.model.trim(),
-            protocol = settings.protocol,
-            contextLength = settings.contextLength,
-            maxOutputTokens = settings.maxOutputTokens,
+            apiAddress = entry.apiAddress.trim(),
+            apiKey = entry.apiKey.trim(),
+            model = model.trim(),
+            protocol = entry.protocol,
+            contextLength = entry.contextLength,
+            maxOutputTokens = entry.maxOutputTokens,
         )
     }
 
     override suspend fun complete(request: LlmRequest): LlmResponse {
-        val settings = settingsStore.load()
-        ProviderTrace.request("complete ${settings.protocol} ${settings.model}")
+        val entry = activeProvider()
+        ProviderTrace.request("complete ${entry.protocol} ${entry.models.firstOrNull()}")
         return try {
-            val response = CustomLlmService(configOf(settings), rawSink = ProviderTrace::raw).complete(request)
+            val response = CustomLlmService(configOf(entry), rawSink = ProviderTrace::raw).complete(request)
             ProviderTrace.end("complete finished, ${response.content.length} chars")
             response
         } catch (t: Throwable) {
@@ -60,10 +68,10 @@ class ConfigurableLlmService @Inject constructor(
         onDelta: suspend (String) -> Unit,
         onReasoning: suspend (String) -> Unit,
     ): LlmResponse {
-        val settings = settingsStore.load()
-        ProviderTrace.request("stream ${settings.protocol} ${settings.model}")
+        val entry = activeProvider()
+        ProviderTrace.request("stream ${entry.protocol} ${entry.models.firstOrNull()}")
         return try {
-            val response = CustomLlmService(configOf(settings), rawSink = ProviderTrace::raw)
+            val response = CustomLlmService(configOf(entry), rawSink = ProviderTrace::raw)
                 .stream(request, onDelta, onReasoning)
             ProviderTrace.end("stream finished, ${response.content.length} chars")
             response
@@ -76,22 +84,20 @@ class ConfigurableLlmService @Inject constructor(
     /**
      * Connection probe: fetches the model list using only the API address
      * (and key when provided). Model and context fields are NOT required —
-     * `/models` does not need them, so a user can test the connection right
-     * after filling address and key.
+     * `/models` does not need them, so a user can test right after filling
+     * address and key.
      */
-    suspend fun testConnection(settings: ProviderSettings): List<String> {
-        if (settings.apiAddress.isBlank()) {
-            throw LlmProviderException("请先填写 API 地址")
-        }
+    suspend fun testConnection(entry: ProviderEntry): List<String> {
+        if (entry.apiAddress.isBlank()) throw LlmProviderException("请先填写 API 地址")
         val probe = CustomProviderConfig(
-            apiAddress = settings.apiAddress.trim(),
-            apiKey = settings.apiKey.trim(),
+            apiAddress = entry.apiAddress.trim(),
+            apiKey = entry.apiKey.trim(),
             model = "probe",
-            protocol = settings.protocol,
+            protocol = entry.protocol,
             contextLength = 4096,
             maxOutputTokens = null,
         )
-        ProviderTrace.request("probe ${settings.protocol} ${settings.apiAddress}")
+        ProviderTrace.request("probe ${entry.protocol} ${entry.apiAddress}")
         return try {
             CustomLlmService(probe).listModels()
         } catch (t: Throwable) {

@@ -7,6 +7,7 @@ import android.util.Base64
 import com.lhzkml.jasmine.core.agent.ProviderProtocol
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.KeyStore
+import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -15,26 +16,29 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 
-/** The provider connection settings the chat page and settings UI share. */
-data class ProviderSettings(
+/**
+ * One user-defined provider connection. A provider owns several selected
+ * models; the chat uses the first selected model of the active provider.
+ */
+data class ProviderEntry(
+    val id: String,
+    val name: String,
+    val protocol: ProviderProtocol = ProviderProtocol.CHAT_COMPLETIONS,
     val apiAddress: String = "",
     val apiKey: String = "",
-    val model: String = "",
-    val protocol: ProviderProtocol = ProviderProtocol.CHAT_COMPLETIONS,
+    val models: List<String> = emptyList(),
     val contextLength: Int = 0,
     /** `null` means omit the output cap and use the provider maximum. */
     val maxOutputTokens: Int? = null,
-) {
-    val isConfigured: Boolean
-        get() = apiAddress.isNotBlank() && model.isNotBlank() && contextLength > 0 &&
-            (maxOutputTokens == null || maxOutputTokens in 1 until contextLength)
-}
+)
 
 /**
- * Persists provider settings. The API key is encrypted at rest with an
- * Android Keystore AES-GCM key (never plaintext in SharedPreferences);
- * baseUrl and model are not secrets.
+ * Persists the provider list (many providers) plus the single active
+ * provider id. Each API key is encrypted at rest with an Android Keystore
+ * AES-GCM key; the rest of an entry is not secret.
  */
 @Singleton
 class ProviderSettingsStore @Inject constructor(
@@ -44,39 +48,110 @@ class ProviderSettingsStore @Inject constructor(
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val secureKey = SecureKeyStore(context)
 
-    suspend fun load(): ProviderSettings = withContext(Dispatchers.IO) {
-        ProviderSettings(
-            apiAddress = prefs.getString(KEY_API_ADDRESS, null).orEmpty(),
-            apiKey = secureKey.decrypt(prefs.getString(KEY_API_KEY, null).orEmpty()),
-            model = prefs.getString(KEY_MODEL, null).orEmpty(),
-            protocol = prefs.getString(KEY_PROTOCOL, null)
-                ?.let { runCatching { ProviderProtocol.valueOf(it) }.getOrNull() }
-                ?: ProviderProtocol.CHAT_COMPLETIONS,
-            contextLength = prefs.getInt(KEY_CONTEXT_LENGTH, 0),
-            maxOutputTokens = prefs.getInt(KEY_MAX_OUTPUT_TOKENS, 0).takeIf { it > 0 },
-        )
+    suspend fun providers(): List<ProviderEntry> = withContext(Dispatchers.IO) {
+        val stored = prefs.getString(KEY_PROVIDERS, null)
+        val list = stored?.let { parse(it) }.orEmpty()
+        if (list.isEmpty()) migrateLegacySingleProvider() else list
     }
 
-    suspend fun save(settings: ProviderSettings) = withContext(Dispatchers.IO) {
-        val editor = prefs.edit()
-            .putString(KEY_API_ADDRESS, settings.apiAddress)
-            .putString(KEY_API_KEY, secureKey.encrypt(settings.apiKey))
-            .putString(KEY_MODEL, settings.model)
-            .putString(KEY_PROTOCOL, settings.protocol.name)
-            .putInt(KEY_CONTEXT_LENGTH, settings.contextLength)
-        settings.maxOutputTokens?.let { editor.putInt(KEY_MAX_OUTPUT_TOKENS, it) }
-            ?: editor.remove(KEY_MAX_OUTPUT_TOKENS)
-        editor.apply()
+    suspend fun activeProviderId(): String = withContext(Dispatchers.IO) {
+        val all = providers()
+        val active = prefs.getString(KEY_ACTIVE_ID, null)
+        if (active != null && all.any { it.id == active }) active else all.firstOrNull()?.id.orEmpty()
+    }
+
+    suspend fun save(entries: List<ProviderEntry>) = withContext(Dispatchers.IO) {
+        prefs.edit().putString(KEY_PROVIDERS, encode(entries, secureKey)).apply()
+    }
+
+    suspend fun setActive(providerId: String) = withContext(Dispatchers.IO) {
+        prefs.edit().putString(KEY_ACTIVE_ID, providerId).apply()
+    }
+
+    suspend fun newEntry(): ProviderEntry = ProviderEntry(
+        id = UUID.randomUUID().toString(),
+        name = "供应商 ${providers().size + 1}",
+    )
+
+    private fun parse(stored: String): List<ProviderEntry> = runCatching {
+        val array = JSONArray(stored)
+        (0 until array.length()).map { i ->
+            val obj = array.getJSONObject(i)
+            ProviderEntry(
+                id = obj.getString("id"),
+                name = obj.getString("name"),
+                protocol = runCatching { ProviderProtocol.valueOf(obj.getString("protocol")) }
+                    .getOrDefault(ProviderProtocol.CHAT_COMPLETIONS),
+                apiAddress = obj.getString("apiAddress"),
+                apiKey = secureKey.decrypt(obj.getString("apiKey")),
+                models = obj.optJSONArray("models")?.let { models ->
+                    (0 until models.length()).map { models.getString(it) }
+                }.orEmpty(),
+                contextLength = obj.getInt("contextLength"),
+                maxOutputTokens = if (obj.isNull("maxOutputTokens")) null
+                else obj.optInt("maxOutputTokens").takeIf { it > 0 },
+            )
+        }
+    }.getOrDefault(emptyList())
+
+    /**
+     * One-time migration from the legacy single-provider keys: the old
+     * address/key/model become one provider entry named "默认".
+     */
+    private fun migrateLegacySingleProvider(): List<ProviderEntry> {
+        val legacy = LegacySingleProvider(prefs, secureKey)
+        if (legacy.apiAddress.isBlank()) return emptyList()
+        val entry = ProviderEntry(
+            id = UUID.randomUUID().toString(),
+            name = "默认",
+            protocol = legacy.protocol,
+            apiAddress = legacy.apiAddress,
+            apiKey = legacy.apiKey,
+            models = listOf(legacy.model).filter(String::isNotBlank),
+            contextLength = legacy.contextLength,
+            maxOutputTokens = legacy.maxOutputTokens,
+        )
+        prefs.edit().putString(KEY_PROVIDERS, encode(listOf(entry), secureKey)).apply()
+        return listOf(entry)
+    }
+
+    private class LegacySingleProvider(
+        private val prefs: android.content.SharedPreferences,
+        private val secureKey: SecureKeyStore,
+    ) {
+        val apiAddress: String get() = prefs.getString("api_address", null).orEmpty()
+        val apiKey: String get() = secureKey.decrypt(prefs.getString("api_key_enc", null).orEmpty())
+        val model: String get() = prefs.getString("model", null).orEmpty()
+        val protocol: ProviderProtocol
+            get() = prefs.getString("protocol", null)
+                ?.let { runCatching { ProviderProtocol.valueOf(it) }.getOrNull() }
+                ?: ProviderProtocol.CHAT_COMPLETIONS
+        val contextLength: Int get() = prefs.getInt("context_length", 0)
+        val maxOutputTokens: Int? get() = prefs.getInt("max_output_tokens", 0).takeIf { it > 0 }
     }
 
     private companion object {
         const val PREFS_NAME = "provider_settings"
-        const val KEY_API_ADDRESS = "api_address"
-        const val KEY_API_KEY = "api_key_enc"
-        const val KEY_MODEL = "model"
-        const val KEY_PROTOCOL = "protocol"
-        const val KEY_CONTEXT_LENGTH = "context_length"
-        const val KEY_MAX_OUTPUT_TOKENS = "max_output_tokens"
+        const val KEY_PROVIDERS = "providers"
+        const val KEY_ACTIVE_ID = "active_provider_id"
+
+        fun encode(entries: List<ProviderEntry>, secureKey: SecureKeyStore): String {
+            val array = JSONArray()
+            entries.forEach { entry ->
+                array.put(
+                    JSONObject()
+                        .put("id", entry.id)
+                        .put("name", entry.name)
+                        .put("protocol", entry.protocol.name)
+                        .put("apiAddress", entry.apiAddress)
+                        .put("apiKey", secureKey.encrypt(entry.apiKey))
+                        .put("models", JSONArray(entry.models))
+                        .put("contextLength", entry.contextLength)
+                        .put("maxOutputTokens", entry.maxOutputTokens ?: JSONObject.NULL)
+                )
+            }
+            return array.toString()
+        }
     }
 }
 

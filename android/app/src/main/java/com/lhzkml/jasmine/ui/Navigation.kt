@@ -9,14 +9,14 @@ import androidx.navigation3.ui.NavDisplay
 import com.lhzkml.jasmine.feature.plugin.navigation.PluginList
 import com.lhzkml.jasmine.feature.plugin.ui.PluginScreen
 import com.lhzkml.jasmine.feature.session.navigation.Chat
-import com.lhzkml.jasmine.feature.session.navigation.ProviderSettings
+import com.lhzkml.jasmine.feature.session.navigation.ProviderEdit
+import com.lhzkml.jasmine.feature.session.navigation.ProviderList
 import com.lhzkml.jasmine.feature.session.navigation.Settings
 import com.lhzkml.jasmine.feature.session.ui.ChatScreen
 
 /**
- * App navigation over Navigation3: chat is the root; plugins and settings
- * are pushed destinations with real back semantics. No hand-rolled tab
- * switching — the library the template ships with does the work.
+ * App navigation over Navigation3: chat is the root; plugins, settings and
+ * the provider pages are pushed destinations with real back semantics.
  */
 @Composable
 fun JasmineNavigation() {
@@ -39,11 +39,20 @@ fun JasmineNavigation() {
             entry<Settings> {
                 SettingsScreen(
                     onOpenPlugins = { backStack.add(PluginList) },
-                    onOpenProviderSettings = { backStack.add(ProviderSettings) },
+                    onOpenProviderSettings = { backStack.add(ProviderList) },
                 )
             }
-            entry<ProviderSettings> {
-                ProviderSettingsScreen()
+            entry<ProviderList> {
+                ProviderListScreen(
+                    onOpenProvider = { id -> backStack.add(ProviderEdit(providerId = id)) },
+                    onCreateProvider = { backStack.add(ProviderEdit(providerId = null)) },
+                )
+            }
+            entry<ProviderEdit> { key ->
+                ProviderEditScreen(
+                    providerId = key.providerId,
+                    onDone = { backStack.removeLastOrNull() },
+                )
             }
             entry<PluginList> {
                 PluginScreen()
