@@ -108,16 +108,26 @@ class ProviderSettingsViewModel @Inject constructor(
         }
     }
 
-    /** Fetches `/models`; this validates address/auth and gives the model chooser data. */
+    /**
+     * Connection probe: fetches `/models` using only the API address (and
+     * key when provided). Model, context and output fields are not required
+     * — they matter only for saving and chatting.
+     */
     fun testAndFetchModels() {
-        val settings = currentSettings().getOrElse { failure ->
-            _uiState.update { it.copy(error = failure.message) }
+        val state = _uiState.value
+        if (state.apiAddress.isBlank()) {
+            _uiState.update { it.copy(error = "请先填写 API 地址") }
             return
         }
+        val probe = ProviderSettings(
+            apiAddress = state.apiAddress.trim(),
+            apiKey = state.apiKey.trim(),
+            protocol = state.protocol,
+        )
         _uiState.update { it.copy(testing = true, result = null, error = null) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { llmService.listModels(settings) }
+                runCatching { llmService.testConnection(probe) }
             }
             _uiState.update { state ->
                 result.fold(

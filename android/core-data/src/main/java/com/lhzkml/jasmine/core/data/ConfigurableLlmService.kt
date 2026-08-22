@@ -73,7 +73,30 @@ class ConfigurableLlmService @Inject constructor(
         }
     }
 
-    /** Lists model ids under the given custom settings; also tests connection. */
-    suspend fun listModels(settings: ProviderSettings): List<String> =
-        CustomLlmService(configOf(settings)).listModels()
+    /**
+     * Connection probe: fetches the model list using only the API address
+     * (and key when provided). Model and context fields are NOT required —
+     * `/models` does not need them, so a user can test the connection right
+     * after filling address and key.
+     */
+    suspend fun testConnection(settings: ProviderSettings): List<String> {
+        if (settings.apiAddress.isBlank()) {
+            throw LlmProviderException("请先填写 API 地址")
+        }
+        val probe = CustomProviderConfig(
+            apiAddress = settings.apiAddress.trim(),
+            apiKey = settings.apiKey.trim(),
+            model = "probe",
+            protocol = settings.protocol,
+            contextLength = 4096,
+            maxOutputTokens = null,
+        )
+        ProviderTrace.request("probe ${settings.protocol} ${settings.apiAddress}")
+        return try {
+            CustomLlmService(probe).listModels()
+        } catch (t: Throwable) {
+            ProviderTrace.end("probe error: ${t.message}")
+            throw t
+        }
+    }
 }
