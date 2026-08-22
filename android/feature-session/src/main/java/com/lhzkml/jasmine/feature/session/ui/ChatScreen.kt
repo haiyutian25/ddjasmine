@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.imeNestedScroll
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -76,8 +75,10 @@ import java.util.Date
  * IME contract (the one that bit us): the activity declares
  * `windowSoftInputMode="adjustResize"` and the input bar is the ONLY place
  * carrying [Modifier.imePadding] — applying it elsewhere double-counts the
- * inset and floats the bar mid-screen. The list scrolls with
- * [Modifier.imeNestedScroll] so the newest message stays visible.
+ * inset and floats the bar mid-screen. The list deliberately carries NO
+ * [androidx.compose.foundation.layout.imeNestedScroll]: that modifier feeds
+ * scroll-to-edge overscroll into the IME, so flicking to the bottom of the
+ * list pops the keyboard back up.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -137,7 +138,7 @@ fun ChatScreen(
         Box(Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().imeNestedScroll(),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
