@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
@@ -93,7 +94,16 @@ fun ChatScreen(
 
     val scrollTarget = state.entries.size + if (state.sending) 1 else 0
     LaunchedEffect(scrollTarget) {
-        if (scrollTarget > 0) listState.animateScrollToItem(scrollTarget - 1)
+        if (scrollTarget > 0) listState.followTail()
+    }
+
+    // Follow the live reply while the stream advances, but only when the user
+    // is already at the newest line — a manual scroll up into history pauses
+    // the follow until they come back to the bottom.
+    LaunchedEffect(state.streamingText, state.streamingReasoning) {
+        val hasLive = state.sending &&
+            (!state.streamingText.isNullOrEmpty() || !state.streamingReasoning.isNullOrEmpty())
+        if (hasLive) listState.followTail()
     }
 
     Scaffold(
@@ -133,13 +143,8 @@ fun ChatScreen(
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            // reverseLayout is the chat standard: the newest line anchors to
-            // the viewport bottom, so a growing stream keeps the latest text
-            // in view by itself — no per-delta scrolling needed, and a manual
-            // scroll up into history is never yanked back down.
             LazyColumn(
                 state = listState,
-                reverseLayout = true,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -431,4 +436,33 @@ private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
             modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
         )
     }
+}
+
+/**
+ * Scrolls to the newest line with its bottom edge snapped to the viewport
+ * bottom, so a growing reply's latest text stays readable. A normal
+ * [LazyListState.scrollToItem] only aligns the item's top, which strands the
+ * live tail below the fold once a reply outgrows the screen.
+ */
+private suspend fun LazyListState.scrollToBottom() {
+    val total = layoutInfo.totalItemsCount
+    if (total == 0) return
+    animateScrollToItem(total - 1)
+    scroll {
+        val last = layoutInfo.visibleItemsInfo.firstOrNull { it.index == total - 1 } ?: return@scroll
+        val beyond = (last.offset + last.size) - layoutInfo.viewportSize.height
+        if (beyond > 0) scrollBy(beyond.toFloat())
+    }
+}
+
+/**
+ * Follows the newest line only while the user is already at the tail; once
+ * they scroll away to read history, the follow pauses until they return.
+ */
+private suspend fun LazyListState.followTail() {
+    val total = layoutInfo.totalItemsCount
+    if (total == 0) return
+    val atBottom = layoutInfo.visibleItemsInfo.lastOrNull()
+        ?.let { it.index >= total - 1 } ?: true
+    if (atBottom) scrollToBottom()
 }
