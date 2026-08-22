@@ -94,14 +94,20 @@ fun ChatScreen(
 
     // Real gesture detection for the follow toggle: only UserInput scrolls
     // flip it, so the follow's own programmatic scrolling can never be
-    // mistaken for the user leaving the tail. A drag toward history pauses
-    // the follow instantly; a drag toward the bottom resumes it.
+    // mistaken for the user leaving the tail. Leaving is instant (any
+    // history-ward drag, however small); coming back requires the user's
+    // gesture to actually land on the very bottom — releasing mid-list
+    // stays put where the finger left it.
     var followEnabled by remember { mutableStateOf(true) }
     val followToggle = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (source == NestedScrollSource.UserInput) {
-                    followEnabled = available.y > 0f
+                    if (available.y < 0f) {
+                        followEnabled = false
+                    } else if (!listState.canScrollForward) {
+                        followEnabled = true
+                    }
                 }
                 return Offset.Zero
             }
