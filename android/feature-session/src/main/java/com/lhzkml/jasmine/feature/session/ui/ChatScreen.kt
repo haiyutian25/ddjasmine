@@ -96,6 +96,21 @@ fun ChatScreen(
         if (scrollTarget > 0) listState.animateScrollToItem(scrollTarget - 1)
     }
 
+    // Follow the live reply: each streaming delta grows the text, so scroll
+    // to the newest line whenever the stream advances — but only when the
+    // user is already at the tail, never yanking them out of history.
+    LaunchedEffect(state.streamingText, state.streamingReasoning) {
+        val hasLive = state.sending &&
+            (!state.streamingText.isNullOrEmpty() || !state.streamingReasoning.isNullOrEmpty())
+        if (!hasLive) return@LaunchedEffect
+        val total = listState.layoutInfo.totalItemsCount
+        if (total == 0) return@LaunchedEffect
+        val atTail = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+            ?.let { it.index >= total - 1 } ?: true
+        if (!atTail) return@LaunchedEffect
+        listState.scrollToItem(total - 1)
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
