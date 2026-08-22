@@ -441,15 +441,19 @@ private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
 /**
  * Scrolls to the newest line with its bottom edge snapped to the viewport
  * bottom. Never calls [LazyListState.scrollToItem] here: for a line taller
- * than the viewport that call aligns the item's TOP to the viewport top —
- * the view would jump back up to the over-the-fold position on every delta,
- * then scrollBy rides down again, which is exactly the back-and-forth
- * jumping we had. Riding to the end is a no-op when already there.
+ * than the viewport that call aligns the item's TOP to the viewport top,
+ * which jumps the view back to the over-the-fold position on every delta.
+ * Riding to the end is a no-op when already there. A single
+ * Float.MAX_VALUE delta is avoided on purpose: the value overflows when the
+ * scroll machinery converts it to an Int and clamps the position to zero,
+ * which yanks the list back to the top on every delta.
  */
 private suspend fun LazyListState.scrollToBottom() {
     if (layoutInfo.totalItemsCount == 0) return
     scroll {
-        scrollBy(Float.MAX_VALUE)
+        while (scrollBy(4096f) > 0f) {
+            // Keep riding to the very end; returns 0 once there.
+        }
     }
 }
 
