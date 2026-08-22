@@ -55,6 +55,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -325,7 +326,7 @@ private fun ChatInputBar(
             BasicTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 66.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 69.dp),
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                     color = MaterialTheme.colorScheme.onSurface,
                 ),
@@ -339,10 +340,10 @@ private fun ChatInputBar(
                                 stringResource(R.string.chat_hint),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 3.dp),
+                                modifier = Modifier.padding(top = 4.dp),
                             )
                         }
-                        Box(Modifier.padding(top = 3.dp)) { inner() }
+                        Box(Modifier.padding(top = 4.dp)) { inner() }
                     }
                 },
             )
@@ -380,10 +381,11 @@ private fun ChatInputBar(
                 }
                 // Send mirrors the model chip exactly (same radius, type scale
                 // and padding) so the two sit flush on one baseline; the only
-                // difference is the filled color, which greys out when disabled.
+                // difference is the fill, which is pure white when enabled so
+                // it pops against the warm surface, and greys out when not.
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = if (sendEnabled) MaterialTheme.colorScheme.primary
+                    color = if (sendEnabled) Color.White
                     else MaterialTheme.colorScheme.surfaceContainerHighest,
                     modifier = Modifier
                         .padding(start = 8.dp)
