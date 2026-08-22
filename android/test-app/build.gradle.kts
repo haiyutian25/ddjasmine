@@ -1,0 +1,75 @@
+/*
+ * Copyright (C) 2022 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+@Suppress("DSL_SCOPE_VIOLATION") // Remove when fixed https://youtrack.jetbrains.com/issue/KTIJ-19369
+plugins {
+    alias(libs.plugins.android.test)
+
+    alias(libs.plugins.ksp)
+}
+
+android {
+    namespace = "com.lhzkml.jasmine.test.app"
+    compileSdk = 36
+    targetProjectPath = ":app"
+
+    defaultConfig {
+        minSdk = 26
+        targetSdk = 36
+
+        testInstrumentationRunner = "com.lhzkml.jasmine.core.testing.HiltTestRunner"
+    }
+
+    buildFeatures {
+        aidl = false
+        buildConfig = false
+        renderScript = false
+        shaders = false
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
+dependencies {
+    implementation(project(":app"))
+    val composeBom = platform(libs.androidx.compose.bom)
+    implementation(composeBom)
+    implementation(project(":core-data"))
+    implementation(project(":core-testing"))
+    implementation(project(":feature-plugin"))
+    implementation(project(":feature-plugin-navigation"))
+
+    // Testing
+    implementation(libs.androidx.test.core)
+
+    // Hilt and instrumented tests.
+    implementation(libs.hilt.android.testing)
+    ksp(libs.hilt.compiler)
+
+    // Compose
+    implementation(libs.androidx.compose.ui.test.junit4)
+}

@@ -1,0 +1,15 @@
+[package]
+name = "measure"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Fixed-density token estimation and the surface-token folds shared by metering, compaction, and pruning"
+
+[dependencies]
+session-log = { path = "../session-log" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

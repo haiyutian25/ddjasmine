@@ -1,0 +1,4 @@
+# Kotlin binding generation settings for the ffi crate.
+[bindings.kotlin]
+package_name = "com.lhzkml.jasmine.rust"
+generate_immutable_records = true

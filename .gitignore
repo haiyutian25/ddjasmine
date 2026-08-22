@@ -1,0 +1,23 @@
+# Rust
+rust/target/
+
+# Android / Gradle
+android/.gradle/
+android/.kotlin/
+android/.cxx/
+android/build/
+android/local.properties
+android/**/build/
+android/**/.cxx/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local capture (private storage; device Downloads copies are not in the tree)
+android/app/files/

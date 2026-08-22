@@ -1,0 +1,11 @@
+<resources>
+    <string name="plugin_list_title">Plugins</string>
+    <string name="plugin_list_empty">No plugins composed.</string>
+    <string name="plugin_warnings_header">Warnings</string>
+    <string name="plugin_group_badge">group</string>
+    <string name="plugin_runtime_mounted">mounted</string>
+    <string name="plugin_runtime_unmounted">unmounted</string>
+    <string name="plugin_runtime_no_code">no code</string>
+    <string name="plugin_runtime_failed">failed</string>
+    <string name="plugin_error">Error: %1$s</string>
+</resources>

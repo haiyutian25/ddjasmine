@@ -1,0 +1,13 @@
+[package]
+name = "compose"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Patch composer: YAML rows to layered composition (locate by id, per-key shallow override, insert-append, warn-skip)"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,9 @@
+<resources>
+    <string name="chat_title">Jasmine</string>
+    <string name="chat_new">新会话</string>
+    <string name="chat_hint">输入消息…</string>
+    <string name="chat_send">发送</string>
+    <string name="chat_error">错误：%1$s</string>
+    <string name="chat_settings">设置</string>
+    <string name="chat_reasoning_label">思考过程</string>
+</resources>

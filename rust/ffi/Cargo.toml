@@ -1,0 +1,21 @@
+[package]
+name = "ffi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "UniFFI interface layer: the only window between the Kotlin behavior kernel and the Rust data spine"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+session-log = { path = "../session-log" }
+store = { path = "../store" }
+compose = { path = "../compose" }
+codec = { path = "../codec" }
+uniffi = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

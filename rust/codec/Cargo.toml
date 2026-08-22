@@ -1,0 +1,12 @@
+[package]
+name = "codec"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Byte codecs: incremental SSE frame parser (UTF-8/CRLF/BOM) and content-addressed attachments"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
