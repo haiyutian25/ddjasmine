@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lhzkml.jasmine.core.agent.AgentLoop
 import com.lhzkml.jasmine.core.agent.SessionStore
+import com.lhzkml.jasmine.core.data.ProviderSettingsStore
 import com.lhzkml.jasmine.core.data.SessionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.concurrent.atomic.AtomicLong
@@ -15,6 +16,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** One selectable model across all providers (provider name shown in the picker). */
+data class ModelOption(
+    val providerId: String,
+    val providerName: String,
+    val model: String,
+)
 
 /** One settled chat line in the live transcript. */
 data class ChatEntry(
@@ -37,12 +45,17 @@ class SessionViewModel @Inject constructor(
     private val sessionRepository: SessionRepository,
     private val agentLoop: AgentLoop,
     private val sessionStore: SessionStore,
+    private val providerStore: ProviderSettingsStore,
 ) : ViewModel() {
 
     data class UiState(
         val sessionId: String? = null,
         val entries: List<ChatEntry> = emptyList(),
         val sending: Boolean = false,
+        /** All models selected across all providers (chat model picker). */
+        val modelOptions: List<ModelOption> = emptyList(),
+        /** The model the chat currently uses. */
+        val activeModel: String? = null,
         /** Assistant final text accumulated from the live stream. */
         val streamingText: String? = null,
         /** Thinking text streamed before the final content (reasoner models). */
@@ -57,6 +70,35 @@ class SessionViewModel @Inject constructor(
 
     init {
         newSession()
+        loadModelOptions()
+    }
+
+    /** Loads every provider's selected models plus the pinned chat model. */
+    fun loadModelOptions() {
+        viewModelScope.launch {
+            val (options, activeModel) = withContext(Dispatchers.IO) {
+                val providers = providerStore.providers()
+                val options = providers.flatMap { provider ->
+                    provider.models.map { ModelOption(provider.id, provider.name, it) }
+                }
+                val pinned = providerStore.activeModelId()
+                val active = pinned?.takeIf { model -> options.any { it.model == model } }
+                    ?: options.firstOrNull()?.model
+                options to active
+            }
+            _uiState.update { it.copy(modelOptions = options, activeModel = activeModel) }
+        }
+    }
+
+    /** Switches the chat model and pins its provider as active. */
+    fun selectModel(option: ModelOption) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                providerStore.setActiveModel(option.model)
+                providerStore.setActive(option.providerId)
+            }
+            _uiState.update { it.copy(activeModel = option.model) }
+        }
     }
 
     /** Starts a fresh session log. */

@@ -68,6 +68,15 @@ class ProviderSettingsStore @Inject constructor(
         prefs.edit().putString(KEY_ACTIVE_ID, providerId).apply()
     }
 
+    /** The model currently used by the chat, when pinned. */
+    suspend fun activeModelId(): String? = withContext(Dispatchers.IO) {
+        prefs.getString(KEY_ACTIVE_MODEL, null)
+    }
+
+    suspend fun setActiveModel(modelId: String) = withContext(Dispatchers.IO) {
+        prefs.edit().putString(KEY_ACTIVE_MODEL, modelId).apply()
+    }
+
     suspend fun newEntry(): ProviderEntry = ProviderEntry(
         id = UUID.randomUUID().toString(),
         name = "供应商 ${providers().size + 1}",
@@ -134,6 +143,7 @@ class ProviderSettingsStore @Inject constructor(
         const val PREFS_NAME = "provider_settings"
         const val KEY_PROVIDERS = "providers"
         const val KEY_ACTIVE_ID = "active_provider_id"
+        const val KEY_ACTIVE_MODEL = "active_model_id"
 
         fun encode(entries: List<ProviderEntry>, secureKey: SecureKeyStore): String {
             val array = JSONArray()

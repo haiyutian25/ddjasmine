@@ -2,9 +2,12 @@ package com.lhzkml.jasmine.feature.session.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -20,6 +23,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -115,6 +121,9 @@ fun ChatScreen(
                     draft = ""
                 },
                 sendEnabled = draft.isNotBlank() && !state.sending,
+                activeModel = state.activeModel,
+                modelOptions = state.modelOptions,
+                onSelectModel = viewModel::selectModel,
             )
         },
     ) { padding ->
@@ -285,29 +294,84 @@ private fun ChatInputBar(
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     sendEnabled: Boolean,
+    activeModel: String?,
+    modelOptions: List<ModelOption>,
+    onSelectModel: (ModelOption) -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                // navigationBarsPadding keeps the bar above the gesture area;
-                // imePadding keeps it above the keyboard. Inset consumers take
-                // the max of both — they never stack, so the bar never floats.
-                .navigationBarsPadding()
-                .imePadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = onDraftChange,
-                placeholder = { Text(stringResource(R.string.chat_hint)) },
-                modifier = Modifier.weight(1f),
-                maxLines = 4,
-            )
-            Button(onClick = onSend, enabled = sendEnabled) {
-                Text(stringResource(R.string.chat_send))
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            // navigationBarsPadding keeps the bar above the gesture area;
+            // imePadding keeps it above the keyboard. Inset consumers take
+            // the max of both — they never stack, so the bar never floats.
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+            // Top-right: the model currently in use; tapping opens the picker.
+            Box(Modifier.fillMaxWidth()) {
+                var menuOpen by remember { mutableStateOf(false) }
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    modifier = Modifier.align(Alignment.CenterEnd).clickable { menuOpen = true },
+                ) {
+                    Text(
+                        activeModel ?: "选择模型",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    modelOptions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text("${option.providerName} · ${option.model}") },
+                            onClick = {
+                                onSelectModel(option)
+                                menuOpen = false
+                            },
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = onDraftChange,
+                    placeholder = { Text(stringResource(R.string.chat_hint)) },
+                    modifier = Modifier.weight(1f),
+                    maxLines = 4,
+                    shape = RoundedCornerShape(18.dp),
+                )
+                Button(onClick = onSend, enabled = sendEnabled) {
+                    Text(stringResource(R.string.chat_send))
+                }
+            }
+            // Bottom: every selected model across all providers, tappable.
+            if (modelOptions.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    modelOptions.forEach { option ->
+                        FilterChip(
+                            selected = option.model == activeModel,
+                            onClick = { onSelectModel(option) },
+                            label = { Text(option.model) },
+                        )
+                    }
+                }
             }
         }
     }

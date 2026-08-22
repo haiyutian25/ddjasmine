@@ -27,34 +27,45 @@ class ConfigurableLlmService @Inject constructor(
         ProviderTrace.start(context)
     }
 
-    /** The active provider, or the first one when nothing is pinned. */
-    suspend fun activeProvider(): ProviderEntry {
+    /** The provider plus the model the chat currently uses. */
+    data class ActiveModel(val provider: ProviderEntry, val model: String)
+
+    /**
+     * Resolves the chat's model: the pinned model wins; otherwise the active
+     * provider's first selected model.
+     */
+    suspend fun activeModel(): ActiveModel {
         val all = settingsStore.providers()
         if (all.isEmpty()) throw LlmProviderException("请先在设置中添加模型供应商")
+        settingsStore.activeModelId()?.let { pinned ->
+            all.firstOrNull { it.models.contains(pinned) }?.let { return ActiveModel(it, pinned) }
+        }
         val activeId = settingsStore.activeProviderId()
-        return all.firstOrNull { it.id == activeId } ?: all.first()
+        val provider = all.firstOrNull { it.id == activeId } ?: all.first()
+        val model = provider.models.firstOrNull()
+            ?: throw LlmProviderException("供应商「${provider.name}」未选择模型")
+        return ActiveModel(provider, model)
     }
 
-    private fun configOf(entry: ProviderEntry): CustomProviderConfig {
-        val model = entry.models.firstOrNull()
-        if (entry.apiAddress.isBlank()) throw LlmProviderException("供应商「${entry.name}」缺少 API 地址")
-        if (model.isNullOrBlank()) throw LlmProviderException("供应商「${entry.name}」未选择模型")
-        if (entry.contextLength <= 0) throw LlmProviderException("供应商「${entry.name}」缺少上下文长度")
+    private fun configOf(provider: ProviderEntry, model: String): CustomProviderConfig {
+        if (provider.apiAddress.isBlank()) throw LlmProviderException("供应商「${provider.name}」缺少 API 地址")
+        if (provider.contextLength <= 0) throw LlmProviderException("供应商「${provider.name}」缺少上下文长度")
         return CustomProviderConfig(
-            apiAddress = entry.apiAddress.trim(),
-            apiKey = entry.apiKey.trim(),
+            apiAddress = provider.apiAddress.trim(),
+            apiKey = provider.apiKey.trim(),
             model = model.trim(),
-            protocol = entry.protocol,
-            contextLength = entry.contextLength,
-            maxOutputTokens = entry.maxOutputTokens,
+            protocol = provider.protocol,
+            contextLength = provider.contextLength,
+            maxOutputTokens = provider.maxOutputTokens,
         )
     }
 
     override suspend fun complete(request: LlmRequest): LlmResponse {
-        val entry = activeProvider()
-        ProviderTrace.request("complete ${entry.protocol} ${entry.models.firstOrNull()}")
+        val active = activeModel()
+        ProviderTrace.request("complete ${active.provider.protocol} ${active.model}")
         return try {
-            val response = CustomLlmService(configOf(entry), rawSink = ProviderTrace::raw).complete(request)
+            val response = CustomLlmService(configOf(active.provider, active.model), rawSink = ProviderTrace::raw)
+                .complete(request)
             ProviderTrace.end("complete finished, ${response.content.length} chars")
             response
         } catch (t: Throwable) {
@@ -68,10 +79,10 @@ class ConfigurableLlmService @Inject constructor(
         onDelta: suspend (String) -> Unit,
         onReasoning: suspend (String) -> Unit,
     ): LlmResponse {
-        val entry = activeProvider()
-        ProviderTrace.request("stream ${entry.protocol} ${entry.models.firstOrNull()}")
+        val active = activeModel()
+        ProviderTrace.request("stream ${active.provider.protocol} ${active.model}")
         return try {
-            val response = CustomLlmService(configOf(entry), rawSink = ProviderTrace::raw)
+            val response = CustomLlmService(configOf(active.provider, active.model), rawSink = ProviderTrace::raw)
                 .stream(request, onDelta, onReasoning)
             ProviderTrace.end("stream finished, ${response.content.length} chars")
             response
