@@ -75,10 +75,7 @@ import java.util.Date
  * IME contract (the one that bit us): the activity declares
  * `windowSoftInputMode="adjustResize"` and the input bar is the ONLY place
  * carrying [Modifier.imePadding] — applying it elsewhere double-counts the
- * inset and floats the bar mid-screen. The list deliberately carries NO
- * [androidx.compose.foundation.layout.imeNestedScroll]: that modifier feeds
- * scroll-to-edge overscroll into the IME, so flicking to the bottom of the
- * list pops the keyboard back up.
+ * inset and floats the bar mid-screen.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
