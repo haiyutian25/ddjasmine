@@ -2,6 +2,7 @@ package com.lhzkml.jasmine.feature.session.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lhzkml.jasmine.core.ui.InkBlack
 import com.lhzkml.jasmine.feature.session.R
 import java.text.DateFormat
 import java.util.Date
@@ -363,7 +365,8 @@ private fun ChatInputBar(
                         Text(
                             activeModel ?: "选择模型",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.secondary,
+                            color = if (isSystemInDarkTheme()) MaterialTheme.colorScheme.secondary
+                            else InkBlack,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         )
                     }

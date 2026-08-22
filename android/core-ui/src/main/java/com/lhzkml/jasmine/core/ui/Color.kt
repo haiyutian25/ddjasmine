@@ -15,6 +15,7 @@ val JasmineWhite40 = Color(0xFFF7F5EF)
 val LeafGreen40 = Color(0xFF5C6B57)
 val BudAmber40 = Color(0xFFC9A96A)
 val InkGreen = Color(0xFF33372E)
+val InkBlack = Color(0xFF000000)
 
 // --- light containers & surfaces ---
 val LeafContainerLight = Color(0xFFD8E2D2)
