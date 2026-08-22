@@ -316,32 +316,33 @@ private fun ChatInputBar(
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         // Bottom padding is a hairline only, so the action row hugs the box's
-        // bottom edge; top padding plus vertical centering push the text
-        // (and the placeholder) down off the box's top edge.
-        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)) {
-            // Taller text area; the box itself spans the full width. The
-            // decoration Box centers the caret and placeholder vertically, so
-            // single-line text sits mid-area instead of hugging the top edge.
+        // bottom edge; a small top inset keeps the text just off the top edge
+        // without dropping it toward the middle of the taller area.
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 4.dp)) {
+            // Taller text area; the box itself spans the full width. The text
+            // stays top-aligned with a hair of offset — centering it in the
+            // taller area pushed it too far down.
             BasicTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 66.dp),
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                     color = MaterialTheme.colorScheme.onSurface,
                 ),
                 decorationBox = { inner ->
                     Box(
                         modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.CenterStart,
+                        contentAlignment = Alignment.TopStart,
                     ) {
                         if (draft.isEmpty()) {
                             Text(
                                 stringResource(R.string.chat_hint),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 3.dp),
                             )
                         }
-                        inner()
+                        Box(Modifier.padding(top = 3.dp)) { inner() }
                     }
                 },
             )
