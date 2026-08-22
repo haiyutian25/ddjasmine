@@ -439,32 +439,25 @@ private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
 }
 
 /**
- * Scrolls to the newest line with its bottom edge snapped to the viewport
- * bottom. Never calls [LazyListState.scrollToItem] here: for a line taller
- * than the viewport that call aligns the item's TOP to the viewport top,
- * which jumps the view back to the over-the-fold position on every delta.
- * Riding to the end is a no-op when already there. A single
- * Float.MAX_VALUE delta is avoided on purpose: the value overflows when the
- * scroll machinery converts it to an Int and clamps the position to zero,
- * which yanks the list back to the top on every delta.
- */
-private suspend fun LazyListState.scrollToBottom() {
-    if (layoutInfo.totalItemsCount == 0) return
-    scroll {
-        while (scrollBy(4096f) > 0f) {
-            // Keep riding to the very end; returns 0 once there.
-        }
-    }
-}
-
-/**
  * Follows the newest line only while the user is already at the tail; once
  * they scroll away to read history, the follow pauses until they return.
+ *
+ * The scroll distance is measured, never guessed: the newest visible line's
+ * bottom edge vs the viewport bottom, so each delta moves exactly the pixels
+ * the growing line pushed past the fold. No [LazyListState.scrollToItem]
+ * (it aligns a tall line's TOP to the viewport top — the jump-back bug), no
+ * giant scrollBy values (Int overflow clamps the position to zero — the
+ * stuck-at-first-screen bug), and nothing to loop.
  */
 private suspend fun LazyListState.followTail() {
-    val total = layoutInfo.totalItemsCount
+    val info = layoutInfo
+    val total = info.totalItemsCount
     if (total == 0) return
-    val atBottom = layoutInfo.visibleItemsInfo.lastOrNull()
-        ?.let { it.index >= total - 1 } ?: true
-    if (atBottom) scrollToBottom()
+    // The newest line must be at least partially visible; when the viewport
+    // bottom shows only older lines the user is reading history — hold still.
+    val last = info.visibleItemsInfo.lastOrNull { it.index == total - 1 } ?: return
+    val beyond = (last.offset + last.size) - info.viewportSize.height
+    if (beyond > 0) {
+        scroll { scrollBy(beyond.toFloat()) }
+    }
 }
