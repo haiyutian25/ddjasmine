@@ -165,8 +165,6 @@ fun ChatScreen(
                 onSend = {
                     viewModel.send(draft)
                     draft = ""
-                    // Sending a message is intent to watch the reply.
-                    followEnabled = true
                 },
                 sendEnabled = draft.isNotBlank() && !state.sending,
                 activeModel = state.activeModel,
