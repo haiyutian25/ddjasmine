@@ -12,10 +12,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * The bound provider seam over the stored provider list: chat uses the
- * active provider's first selected model. Jasmine has no built-in provider
- * and no mock fallback — an unconfigured or model-less active provider
- * fails with an actionable error.
+ * The bound provider seam over the stored provider list: the chat uses the
+ * pinned model only — no selection is an explicit "choose a model" error,
+ * never a silent fallback. Every provider is active at once; there is no
+ * active provider switch. Jasmine has no built-in provider and no mock
+ * fallback — an unconfigured or model-less provider fails with an
+ * actionable error.
  */
 @Singleton
 class ConfigurableLlmService @Inject constructor(
@@ -31,20 +33,18 @@ class ConfigurableLlmService @Inject constructor(
     data class ActiveModel(val provider: ProviderEntry, val model: String)
 
     /**
-     * Resolves the chat's model: the pinned model wins; otherwise the active
-     * provider's first selected model.
+     * Resolves the chat's model from the pinned selection only: no selection
+     * (or a selection whose model was removed) is an error, never a silent
+     * fallback to some other model.
      */
     suspend fun activeModel(): ActiveModel {
         val all = settingsStore.providers()
         if (all.isEmpty()) throw LlmProviderException("请先在设置中添加模型供应商")
-        settingsStore.activeModelId()?.let { pinned ->
-            all.firstOrNull { it.models.contains(pinned) }?.let { return ActiveModel(it, pinned) }
-        }
-        val activeId = settingsStore.activeProviderId()
-        val provider = all.firstOrNull { it.id == activeId } ?: all.first()
-        val model = provider.models.firstOrNull()
-            ?: throw LlmProviderException("供应商「${provider.name}」未选择模型")
-        return ActiveModel(provider, model)
+        val pinned = settingsStore.activeModelId()
+            ?: throw LlmProviderException("尚未选择模型，请在聊天输入框中选择一个模型")
+        val provider = all.firstOrNull { it.models.contains(pinned) }
+            ?: throw LlmProviderException("已选择的模型「$pinned」不存在，请在聊天输入框中重新选择")
+        return ActiveModel(provider, pinned)
     }
 
     private fun configOf(provider: ProviderEntry, model: String): CustomProviderConfig {

@@ -82,20 +82,20 @@ class SessionViewModel @Inject constructor(
                     provider.models.map { ModelOption(provider.id, provider.name, it) }
                 }
                 val pinned = providerStore.activeModelId()
+                // No fallback: an unpinned or vanished selection stays
+                // unselected so the input bar shows "选择模型".
                 val active = pinned?.takeIf { model -> options.any { it.model == model } }
-                    ?: options.firstOrNull()?.model
                 options to active
             }
             _uiState.update { it.copy(modelOptions = options, activeModel = activeModel) }
         }
     }
 
-    /** Switches the chat model and pins its provider as active. */
+    /** Pins the selected model for the chat; every provider stays active. */
     fun selectModel(option: ModelOption) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 providerStore.setActiveModel(option.model)
-                providerStore.setActive(option.providerId)
             }
             _uiState.update { it.copy(activeModel = option.model) }
         }

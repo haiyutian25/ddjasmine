@@ -160,8 +160,6 @@ class ProviderEditViewModel @Inject constructor(
                 val exists = all.any { it.id == entry.id }
                 val updated = if (exists) all.map { if (it.id == entry.id) entry else it } else all + entry
                 store.save(updated)
-                // A freshly created provider becomes active immediately.
-                if (!exists && store.activeProviderId().isBlank()) store.setActive(entry.id)
                 true
             }
             _uiState.update { it.copy(saved = true, result = "已保存") }
@@ -175,9 +173,6 @@ class ProviderEditViewModel @Inject constructor(
             withContext(Dispatchers.IO) {
                 val remaining = store.providers().filterNot { it.id == providerId }
                 store.save(remaining)
-                if (store.activeProviderId() == providerId) {
-                    store.setActive(remaining.firstOrNull()?.id.orEmpty())
-                }
             }
             onDeleted()
         }

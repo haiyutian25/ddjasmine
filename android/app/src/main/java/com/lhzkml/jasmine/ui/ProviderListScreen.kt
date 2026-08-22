@@ -29,8 +29,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lhzkml.jasmine.core.data.ProviderEntry
 
 /**
- * The model-provider list: one card per provider, the pinned active one
- * marked "使用中", with set-active and delete per card, and an add button.
+ * The model-provider list: one card per provider. Every provider is active
+ * at once (no switch) — the chat model picker shows all of their models;
+ * each card only offers delete, plus an add button.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,9 +82,7 @@ fun ProviderListScreen(
                     items(state.providers, key = { it.id }) { provider ->
                         ProviderCard(
                             provider = provider,
-                            active = provider.id == state.activeId,
                             onOpen = { onOpenProvider(provider.id) },
-                            onSetActive = { viewModel.setActive(provider.id) },
                             onDelete = { viewModel.delete(provider.id) },
                         )
                     }
@@ -103,27 +102,12 @@ fun ProviderListScreen(
 @Composable
 private fun ProviderCard(
     provider: ProviderEntry,
-    active: Boolean,
     onOpen: () -> Unit,
-    onSetActive: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Column(Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(provider.name, style = MaterialTheme.typography.titleMedium)
-                if (active) {
-                    Text(
-                        "使用中",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
-                }
-            }
+            Text(provider.name, style = MaterialTheme.typography.titleMedium)
             Text(
                 "${provider.protocol.name} · ${provider.apiAddress}",
                 style = MaterialTheme.typography.bodySmall,
@@ -138,9 +122,6 @@ private fun ProviderCard(
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
-                if (!active) {
-                    TextButton(onClick = onSetActive) { Text("设为当前") }
-                }
                 TextButton(onClick = onDelete) { Text("删除", color = MaterialTheme.colorScheme.error) }
             }
         }

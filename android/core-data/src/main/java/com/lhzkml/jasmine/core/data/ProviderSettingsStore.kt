@@ -21,7 +21,8 @@ import org.json.JSONObject
 
 /**
  * One user-defined provider connection. A provider owns several selected
- * models; the chat uses the first selected model of the active provider.
+ * models; the chat picks any of them directly — every provider is active at
+ * once, there is no on/off or single active provider.
  */
 data class ProviderEntry(
     val id: String,
@@ -36,9 +37,9 @@ data class ProviderEntry(
 )
 
 /**
- * Persists the provider list (many providers) plus the single active
- * provider id. Each API key is encrypted at rest with an Android Keystore
- * AES-GCM key; the rest of an entry is not secret.
+ * Persists the provider list (many providers, all active at once). Each API
+ * key is encrypted at rest with an Android Keystore AES-GCM key; the rest of
+ * an entry is not secret.
  */
 @Singleton
 class ProviderSettingsStore @Inject constructor(
@@ -54,18 +55,8 @@ class ProviderSettingsStore @Inject constructor(
         if (list.isEmpty()) migrateLegacySingleProvider() else list
     }
 
-    suspend fun activeProviderId(): String = withContext(Dispatchers.IO) {
-        val all = providers()
-        val active = prefs.getString(KEY_ACTIVE_ID, null)
-        if (active != null && all.any { it.id == active }) active else all.firstOrNull()?.id.orEmpty()
-    }
-
     suspend fun save(entries: List<ProviderEntry>) = withContext(Dispatchers.IO) {
         prefs.edit().putString(KEY_PROVIDERS, encode(entries, secureKey)).apply()
-    }
-
-    suspend fun setActive(providerId: String) = withContext(Dispatchers.IO) {
-        prefs.edit().putString(KEY_ACTIVE_ID, providerId).apply()
     }
 
     /** The model currently used by the chat, when pinned. */
@@ -142,7 +133,6 @@ class ProviderSettingsStore @Inject constructor(
     private companion object {
         const val PREFS_NAME = "provider_settings"
         const val KEY_PROVIDERS = "providers"
-        const val KEY_ACTIVE_ID = "active_provider_id"
         const val KEY_ACTIVE_MODEL = "active_model_id"
 
         fun encode(entries: List<ProviderEntry>, secureKey: SecureKeyStore): String {
