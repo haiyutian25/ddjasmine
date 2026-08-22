@@ -1,6 +1,7 @@
 package com.lhzkml.jasmine.feature.session.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -28,7 +29,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,6 +59,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -103,6 +104,10 @@ fun ChatScreen(
     // history-ward drag, however small); coming back is explicit — the user
     // taps the jump-to-latest FAB (or sends a new message), nothing else.
     var followEnabled by remember { mutableStateOf(true) }
+    // Position baseline right after each follow scroll; an increment that
+    // finds the list above it means the user scrolled up.
+    var lastTailIndex by remember { mutableStateOf(-1) }
+    var lastTailOffset by remember { mutableStateOf(0) }
     val followToggle = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -120,20 +125,28 @@ fun ChatScreen(
 
     val scrollTarget = state.entries.size + if (state.sending) 1 else 0
     LaunchedEffect(scrollTarget) {
-        if (scrollTarget > 0) {
-            // Sending a message is intent to watch the reply: force the
-            // follow back on even if the user had scrolled away before.
-            followEnabled = true
-            listState.followTail()
-        }
+        if (scrollTarget > 0 && followEnabled) listState.followTail()
     }
 
     // Follow the live reply while the stream advances — unless the user's
-    // own gesture has switched the follow off to read earlier content.
+    // gesture (or a net position drift up from the last follow baseline,
+    // which catches any gesture the nested-scroll hook missed) paused it.
     LaunchedEffect(state.streamingText, state.streamingReasoning) {
         val hasLive = state.sending &&
             (!state.streamingText.isNullOrEmpty() || !state.streamingReasoning.isNullOrEmpty())
-        if (hasLive && followEnabled) listState.followTail()
+        if (!hasLive) return@LaunchedEffect
+        if (lastTailIndex >= 0) {
+            val curIndex = listState.firstVisibleItemIndex
+            val curOffset = listState.firstVisibleItemScrollOffset
+            val movedUp = curIndex < lastTailIndex ||
+                (curIndex == lastTailIndex && curOffset < lastTailOffset - 16)
+            if (movedUp) followEnabled = false
+        }
+        if (followEnabled) {
+            listState.followTail()
+            lastTailIndex = listState.firstVisibleItemIndex
+            lastTailOffset = listState.firstVisibleItemScrollOffset
+        }
     }
 
     Scaffold(
@@ -164,6 +177,8 @@ fun ChatScreen(
                 onSend = {
                     viewModel.send(draft)
                     draft = ""
+                    // Sending a message is intent to watch the reply.
+                    followEnabled = true
                 },
                 sendEnabled = draft.isNotBlank() && !state.sending,
                 activeModel = state.activeModel,
@@ -209,21 +224,29 @@ fun ChatScreen(
                     modifier = Modifier.align(Alignment.Center).padding(8.dp),
                 )
             }
-            // Jump-to-latest: shown once the user's gesture paused the follow;
-            // tapping rides to the newest line and re-enables auto-follow.
+            // Jump-to-latest: shown once the user's gesture paused the follow.
+            // A small flat circle centered at the bottom — light fill, thin
+            // outline, black down arrow — tapping rides to the newest line
+            // and re-enables auto-follow.
             if (!followEnabled) {
-                FloatingActionButton(
-                    onClick = {
-                        followEnabled = true
-                        scope.launch { listState.scrollToBottomNow() }
-                    },
+                Box(
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 16.dp, bottom = 16.dp),
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 16.dp)
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .border(1.dp, MaterialTheme.colorScheme.secondary, CircleShape)
+                        .clickable {
+                            followEnabled = true
+                            scope.launch { listState.scrollToBottomNow() }
+                        },
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = Icons.Filled.KeyboardArrowDown,
                         contentDescription = "回到底部",
+                        tint = InkBlack,
                     )
                 }
             }
