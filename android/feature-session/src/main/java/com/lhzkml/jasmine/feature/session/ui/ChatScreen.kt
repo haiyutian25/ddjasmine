@@ -68,6 +68,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lhzkml.jasmine.core.ui.InkBlack
 import com.lhzkml.jasmine.feature.session.R
+import com.mikepenz.markdown.m3.Markdown
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -334,13 +335,13 @@ private fun CollapsibleReasoning(reasoning: String) {
 
 /**
  * The live assistant output while the provider streams. Thinking deltas
- * render above the final content. Before the first delta arrives a small
- * waiting animation shows, so a slow first token never looks stuck.
+ * render above the final content as plain text; the reply body renders
+ * through the streaming Markdown state, which re-parses only the unstable
+ * tail on each append. Before the first delta arrives nothing renders here
+ * so the page-level waiting animation shows.
  */
 @Composable
 private fun StreamingAssistantBlock(reasoning: String, text: String) {
-    // Waiting is a centered overlay, not a message-list row: before the
-    // first token nothing renders here so the page-level animation shows.
     if (reasoning.isEmpty() && text.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
         if (reasoning.isNotEmpty()) {
@@ -351,13 +352,21 @@ private fun StreamingAssistantBlock(reasoning: String, text: String) {
             )
         }
         if (text.isNotEmpty()) {
-            Text(
-                text,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            StreamingMarkdown(text)
         }
     }
+}
+
+/**
+ * Renders the growing reply as Markdown. 0.41.0 has no dedicated streaming
+ * state yet, so each delta re-parses the document — the parser runs async
+ * off the main thread, which keeps the stream smooth for chat-sized
+ * replies. (The renderer's native streaming state needs compileSdk 37 /
+ * v0.42+, revisit when the project upgrades.)
+ */
+@Composable
+private fun StreamingMarkdown(text: String) {
+    Markdown(content = text)
 }
 
 @Composable
@@ -474,17 +483,21 @@ private fun ChatInputBar(
 
 @Composable
 private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
-    // No bubble, but sides are kept distinct: the user reads right-aligned,
-    // the model left-aligned. textAlign needs the full row width.
+    // No bubble, but sides are kept distinct: the user reads right-aligned
+    // as plain text, the model left-aligned as rendered Markdown (the model
+    // replies in GFM — tables, code fences, task lists).
     Column(Modifier.fillMaxWidth()) {
-        Text(
-            content,
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = if (fromUser) TextAlign.End else TextAlign.Start,
-            color = if (fromUser) MaterialTheme.colorScheme.onSurface
-            else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (fromUser) {
+            Text(
+                content,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.End,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            Markdown(content = content)
+        }
         Text(
             DateFormat.getTimeInstance().format(Date(timeMs)),
             style = MaterialTheme.typography.labelSmall,

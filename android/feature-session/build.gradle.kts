@@ -78,6 +78,12 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material:material-icons-extended")
 
+    // Markdown rendering for model replies (GFM tables/task lists/code,
+    // streaming-aware state for live output).
+    implementation(libs.markdown.renderer)
+    implementation(libs.markdown.renderer.m3)
+    implementation(libs.markdown.renderer.code)
+
     // Navigation
     implementation(libs.androidx.navigation3.runtime)
 
