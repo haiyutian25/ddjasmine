@@ -2,18 +2,18 @@ package com.lhzkml.jasmine.feature.session.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.imeNestedScroll
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -25,7 +25,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -85,6 +84,10 @@ fun ChatScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+
+    // Reload the model picker whenever this screen re-enters composition,
+    // so providers added in settings appear without restarting the app.
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.loadModelOptions() }
 
     val scrollTarget = state.entries.size + if (state.sending) 1 else 0
     LaunchedEffect(scrollTarget) {
@@ -298,7 +301,7 @@ private fun ChatInputBar(
     modelOptions: List<ModelOption>,
     onSelectModel: (ModelOption) -> Unit,
 ) {
-    Surface(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             // navigationBarsPadding keeps the bar above the gesture area;
@@ -306,73 +309,66 @@ private fun ChatInputBar(
             // the max of both — they never stack, so the bar never floats.
             .navigationBarsPadding()
             .imePadding()
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Bottom,
     ) {
-        Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-            // Top-right: the model currently in use; tapping opens the picker.
-            Box(Modifier.fillMaxWidth()) {
-                var menuOpen by remember { mutableStateOf(false) }
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    modifier = Modifier.align(Alignment.CenterEnd).clickable { menuOpen = true },
-                ) {
-                    Text(
-                        activeModel ?: "选择模型",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    modelOptions.forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text("${option.providerName} · ${option.model}") },
-                            onClick = {
-                                onSelectModel(option)
-                                menuOpen = false
-                            },
-                        )
-                    }
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                OutlinedTextField(
+        // The rounded box IS the input field: no wrapping card around it.
+        Surface(
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                BasicTextField(
                     value = draft,
                     onValueChange = onDraftChange,
-                    placeholder = { Text(stringResource(R.string.chat_hint)) },
-                    modifier = Modifier.weight(1f),
-                    maxLines = 4,
-                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 24.dp),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    decorationBox = { inner ->
+                        if (draft.isEmpty()) {
+                            Text(
+                                stringResource(R.string.chat_hint),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        inner()
+                    },
                 )
-                Button(onClick = onSend, enabled = sendEnabled) {
-                    Text(stringResource(R.string.chat_send))
-                }
-            }
-            // Bottom: every selected model across all providers, tappable.
-            if (modelOptions.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(top = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    modelOptions.forEach { option ->
-                        FilterChip(
-                            selected = option.model == activeModel,
-                            onClick = { onSelectModel(option) },
-                            label = { Text(option.model) },
+                // Bottom-right inside the field: the model selector.
+                Box(Modifier.fillMaxWidth().padding(top = 2.dp)) {
+                    var menuOpen by remember { mutableStateOf(false) }
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        modifier = Modifier.align(Alignment.CenterEnd).clickable { menuOpen = true },
+                    ) {
+                        Text(
+                            activeModel ?: "选择模型",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         )
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        modelOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text("${option.providerName} · ${option.model}") },
+                                onClick = {
+                                    onSelectModel(option)
+                                    menuOpen = false
+                                },
+                            )
+                        }
                     }
                 }
             }
+        }
+        Button(onClick = onSend, enabled = sendEnabled) {
+            Text(stringResource(R.string.chat_send))
         }
     }
 }

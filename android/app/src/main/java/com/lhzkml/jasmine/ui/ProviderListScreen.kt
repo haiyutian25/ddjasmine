@@ -41,6 +41,10 @@ fun ProviderListScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // Reload whenever this destination re-enters composition (returning from
+    // the edit page), so a freshly saved provider shows immediately.
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.load() }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
