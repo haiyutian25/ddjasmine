@@ -42,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -70,6 +71,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -370,7 +373,14 @@ private fun CollapsibleReasoning(
         }
     }
     if (showSheet) {
-        ModalBottomSheet(onDismissRequest = { showSheet = false }) {
+        // skipPartiallyExpanded: no half-screen state, so no slow
+        // expand-to-full animation and no settle fighting between the
+        // partial and expanded anchors (the source of the jitter).
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showSheet = false },
+            sheetState = sheetState,
+        ) {
             ThinkingSheetContent(
                 userRequest = userRequest,
                 reasoning = reasoning,
@@ -432,38 +442,36 @@ private fun ThinkingSheetContent(
 }
 
 /**
- * One timeline entry: a dot on the left rail, an optional connecting stem
- * below it, and the step's label plus content to the right.
+ * One timeline entry: a dot on the left rail and the step's label plus
+ * content to the right. The connecting stem is drawn behind the row at its
+ * real bounds (drawBehind) — intrinsic-size based rails break inside
+ * scrollable sheets and leave the line cut short.
  */
 @Composable
 private fun TimelineStep(label: String, content: String, showStem: Boolean) {
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
+    val stemColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                if (showStem) {
+                    val x = 11.dp.toPx()
+                    drawLine(
+                        color = stemColor,
+                        start = Offset(x, 17.dp.toPx()),
+                        end = Offset(x, size.height),
+                        strokeWidth = 2.dp.toPx(),
+                    )
+                }
+            },
+    ) {
+        Box(
             modifier = Modifier
-                .padding(start = 4.dp)
-                .width(14.dp)
-                .fillMaxHeight(),
-        ) {
-            Box(
-                modifier = Modifier
-                    .padding(top = 5.dp)
-                    .size(8.dp)
-                    .background(MaterialTheme.colorScheme.tertiary, CircleShape),
-            )
-            if (showStem) {
-                Box(
-                    modifier = Modifier
-                        .padding(top = 3.dp)
-                        .width(2.dp)
-                        .fillMaxHeight()
-                        .background(
-                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f),
-                        ),
-                )
-            }
-        }
-        Spacer(Modifier.width(12.dp))
+                .padding(start = 7.dp, top = 5.dp)
+                .size(8.dp)
+                .background(MaterialTheme.colorScheme.tertiary, CircleShape),
+        )
+        Spacer(Modifier.width(13.dp))
         Column(Modifier.padding(bottom = 18.dp)) {
             Text(
                 label,
