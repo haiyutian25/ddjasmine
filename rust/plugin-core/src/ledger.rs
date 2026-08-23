@@ -72,6 +72,10 @@ pub struct PluginRecord {
     /// Content providers parsed at install, serialized as JSON. Opaque to
     /// the ledger; the proxy layer registers them at load.
     pub providers_json: Option<String>,
+    /// Capabilities the package declares it needs (exec / gpu / network /
+    /// storage / camera). Persisted so runtime gates can consult the
+    /// declared set without re-parsing the APK.
+    pub capabilities: Vec<crate::charter::Capability>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -440,6 +444,7 @@ mod tests {
             classes: classes.iter().map(ToString::to_string).collect(),
             static_receivers_json: None,
             providers_json: None,
+            capabilities: Vec::new(),
         }
     }
 

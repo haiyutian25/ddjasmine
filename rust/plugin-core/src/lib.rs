@@ -24,8 +24,8 @@ use std::path::Path;
 use thiserror::Error;
 
 pub use charter::{
-    AccessRule, CallerIdentity, Charter, ExistingInstall, InstallRequest, PermissionLevel,
-    SignatureStrategy, Verdict,
+    AccessRule, CallerIdentity, Capability, Charter, ExistingInstall, InstallRequest,
+    PermissionLevel, SignatureStrategy, Verdict,
 };
 pub use dispatch::{
     classify_crash, CrashKind, CrashVerdict, DependencyFailure, ExceptionFrame, IntentFilter,
@@ -107,6 +107,14 @@ impl PluginCore {
                 signature_digests: r.signature_digests.clone(),
             });
         self.charter.adjudicate_install(request, existing.as_ref())
+    }
+
+    /// Adjudicates a plugin's declared capabilities at install (escalate to
+    /// user grant until each is authorized). Signature/version gates run
+    /// separately through [`PluginCore::adjudicate_install`].
+    #[must_use]
+    pub fn adjudicate_capabilities(&self, plugin_id: &str, capabilities: &[Capability]) -> Verdict {
+        self.charter.adjudicate_capabilities(plugin_id, capabilities)
     }
 
     /// Commits an install/update after the Kotlin side has placed the
@@ -344,6 +352,7 @@ mod tests {
             classes: classes.iter().map(ToString::to_string).collect(),
             static_receivers_json: None,
             providers_json: None,
+            capabilities: Vec::new(),
         }
     }
 

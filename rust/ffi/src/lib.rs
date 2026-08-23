@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use codec::{SseEvent, SseParser};
 use compose::{EntryRow, PatchLayer};
 use plugin_core::{
-    AccessRule, AuditDrift, CallerIdentity, CoreError, CrashVerdict, DependencyFailure,
+    AccessRule, AuditDrift, CallerIdentity, Capability, CoreError, CrashVerdict, DependencyFailure,
     ExceptionFrame, InstallRequest, IntentFilter, IntentQuery, LocateOutcome, PluginCore,
     PluginRecord, ProviderSpec, SignatureStrategy, StaticReceiver, Verdict,
 };
@@ -673,6 +673,45 @@ impl From<Verdict> for FfiVerdict {
     }
 }
 
+/// FFI mirror of [`Capability`].
+#[derive(uniffi::Enum)]
+pub enum FfiCapability {
+    /// Execute ELF binaries (Proot-style user-space Linux).
+    Exec,
+    /// GPU / accelerator inference (MNN OpenCL/Vulkan backends).
+    Gpu,
+    /// Network access (model / rootfs download).
+    Network,
+    /// Extended storage access (large rootfs payloads).
+    Storage,
+    /// Camera access.
+    Camera,
+}
+
+impl From<FfiCapability> for Capability {
+    fn from(c: FfiCapability) -> Self {
+        match c {
+            FfiCapability::Exec => Capability::Exec,
+            FfiCapability::Gpu => Capability::Gpu,
+            FfiCapability::Network => Capability::Network,
+            FfiCapability::Storage => Capability::Storage,
+            FfiCapability::Camera => Capability::Camera,
+        }
+    }
+}
+
+impl From<Capability> for FfiCapability {
+    fn from(c: Capability) -> Self {
+        match c {
+            Capability::Exec => FfiCapability::Exec,
+            Capability::Gpu => FfiCapability::Gpu,
+            Capability::Network => FfiCapability::Network,
+            Capability::Storage => FfiCapability::Storage,
+            Capability::Camera => FfiCapability::Camera,
+        }
+    }
+}
+
 /// FFI mirror of [`InstallRequest`].
 #[derive(uniffi::Record)]
 pub struct FfiInstallRequest {
@@ -688,6 +727,8 @@ pub struct FfiInstallRequest {
     pub expected_sha256: Option<String>,
     /// Skips the downgrade ban only; signature gates still apply.
     pub force_overwrite: bool,
+    /// Capabilities the package declares it needs.
+    pub capabilities: Vec<FfiCapability>,
 }
 
 impl From<FfiInstallRequest> for InstallRequest {
@@ -699,6 +740,7 @@ impl From<FfiInstallRequest> for InstallRequest {
             package_sha256: r.package_sha256,
             expected_sha256: r.expected_sha256,
             force_overwrite: r.force_overwrite,
+            capabilities: r.capabilities.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -736,6 +778,8 @@ pub struct FfiPluginRecord {
     pub static_receivers_json: Option<String>,
     /// Content providers parsed at install, serialized as JSON.
     pub providers_json: Option<String>,
+    /// Capabilities the package declares it needs.
+    pub capabilities: Vec<FfiCapability>,
 }
 
 impl From<FfiPluginRecord> for PluginRecord {
@@ -756,6 +800,7 @@ impl From<FfiPluginRecord> for PluginRecord {
             classes: r.classes.into_iter().collect(),
             static_receivers_json: r.static_receivers_json,
             providers_json: r.providers_json,
+            capabilities: r.capabilities.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -778,6 +823,7 @@ impl From<PluginRecord> for FfiPluginRecord {
             classes: r.classes.into_iter().collect(),
             static_receivers_json: r.static_receivers_json,
             providers_json: r.providers_json,
+            capabilities: r.capabilities.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -1167,6 +1213,20 @@ impl PluginCoreHandle {
         self.lock().adjudicate_install(&request.into()).into()
     }
 
+    /// Adjudicates a plugin's declared capabilities at install (escalate to
+    /// user grant until each is authorized). Signature/version gates run
+    /// separately through [`PluginCoreHandle::adjudicate_install`].
+    pub fn adjudicate_capabilities(
+        &self,
+        plugin_id: String,
+        capabilities: Vec<FfiCapability>,
+    ) -> FfiVerdict {
+        let capabilities: Vec<Capability> = capabilities.into_iter().map(Into::into).collect();
+        self.lock()
+            .adjudicate_capabilities(&plugin_id, &capabilities)
+            .into()
+    }
+
     /// Commits an install/update after the files are placed; registry and
     /// index land together, persisted before returning.
     pub fn commit_install(&self, record: FfiPluginRecord) -> Result<(), FfiPluginError> {
@@ -1455,6 +1515,7 @@ mod tests {
             package_sha256: "pkg".into(),
             expected_sha256: Some("pkg".into()),
             force_overwrite: false,
+            capabilities: vec![],
         });
         assert!(matches!(verdict, FfiVerdict::Allow));
 
@@ -1474,6 +1535,7 @@ mod tests {
             classes,
             static_receivers_json: None,
             providers_json: None,
+            capabilities: vec![],
         };
         core.commit_install(record("a", vec!["a.Foo".into()]))
             .unwrap();

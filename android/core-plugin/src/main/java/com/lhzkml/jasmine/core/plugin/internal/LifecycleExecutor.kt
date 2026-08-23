@@ -81,14 +81,14 @@ internal class LifecycleExecutor(
                 application,
                 payloadFile(pluginId).absolutePath,
             )
-            entry.onLoad(
-                PluginContext(
-                    application = application,
-                    pluginId = pluginId,
-                    pluginDir = record.installPath,
-                    resources = resources,
-                ),
+            val context = PluginContext(
+                application = application,
+                pluginId = pluginId,
+                pluginDir = record.installPath,
+                resources = resources,
             )
+            entry.onLoad(context)
+            entry.onNativeReady(context)
             loaded[pluginId] = LoadedPlugin(record, classLoader, entry, resources)
             serviceTables[pluginId] = entry.services
             staticActions[pluginId] = registerComponents(record)
@@ -107,6 +107,11 @@ internal class LifecycleExecutor(
         val plugin = loaded.remove(pluginId) ?: return
         serviceTables.remove(pluginId)
         staticActions.remove(pluginId)?.let { StaticReceiverDispatcher.unregisterActions(application, it) }
+        try {
+            plugin.entry.onNativeRelease()
+        } catch (e: Throwable) {
+            failureCallback?.onFailure(pluginId, "native-release", e)
+        }
         try {
             plugin.entry.onUnload()
         } catch (e: Throwable) {

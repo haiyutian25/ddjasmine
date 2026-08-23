@@ -8,6 +8,7 @@ import android.content.res.AssetManager
 import android.content.res.XmlResourceParser
 import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
+import com.lhzkml.jasmine.core.plugin.rust.FfiCapability
 import com.lhzkml.jasmine.core.plugin.rust.FfiPluginRecord
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
@@ -31,9 +32,11 @@ internal class InstallExecutor(private val context: Context) {
     companion object {
         const val META_ENTRY_CLASS = "jasmine.plugin.entryClass"
         const val META_DESCRIPTION = "jasmine.plugin.description"
+        const val META_CAPABILITIES = "jasmine.plugin.capabilities"
         const val PAYLOAD_NAME = "base.apk"
         const val CLASS_INDEX_NAME = "class_index"
         const val LIB_DIR = "lib"
+        const val EXEC_DIR = "exec"
     }
 
     class Metadata(
@@ -44,6 +47,7 @@ internal class InstallExecutor(private val context: Context) {
         val versionName: String,
         val entryClass: String,
         val description: String,
+        val capabilities: List<String>,
     )
 
     fun pluginDir(pluginId: String): File = File(context.filesDir, "plugins/$pluginId")
@@ -51,6 +55,9 @@ internal class InstallExecutor(private val context: Context) {
     fun payloadFile(pluginId: String): File = File(pluginDir(pluginId), PAYLOAD_NAME)
 
     fun libDir(pluginId: String): File = File(pluginDir(pluginId), LIB_DIR)
+
+    /** Where executable assets (`assets/exec/`) are extracted, +x marked. */
+    fun execDir(pluginId: String): File = File(pluginDir(pluginId), EXEC_DIR)
 
     /** Reads and validates package metadata; fails fast on anything missing. */
     fun readMetadata(apk: File): Metadata {
@@ -67,6 +74,11 @@ internal class InstallExecutor(private val context: Context) {
             ?: throw InstallException("插件包缺少 meta-data（未声明 $META_ENTRY_CLASS）: ${info.packageName}")
         val entryClass = meta.getString(META_ENTRY_CLASS)
             ?: throw InstallException("插件包未声明 $META_ENTRY_CLASS: ${info.packageName}")
+        val capabilities = meta.getString(META_CAPABILITIES)
+            ?.split(',')
+            ?.map { it.trim().lowercase() }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
         return Metadata(
             packageName = info.packageName
                 ?: throw InstallException("插件包缺少 package 名: ${apk.absolutePath}"),
@@ -76,6 +88,7 @@ internal class InstallExecutor(private val context: Context) {
             versionName = info.versionName.orEmpty(),
             entryClass = entryClass,
             description = meta.getString(META_DESCRIPTION).orEmpty(),
+            capabilities = capabilities,
         )
     }
 
@@ -120,6 +133,7 @@ internal class InstallExecutor(private val context: Context) {
                 throw InstallException("无法将插件包设为只读（Android 14+ 动态代码加载要求）: $pluginId")
             }
             extractNativeLibraries(payload, File(dir, LIB_DIR))
+            extractExecutableAssets(payload, File(dir, EXEC_DIR))
             File(dir, CLASS_INDEX_NAME).writeText(classes.joinToString("\n"))
             return if (hadPrevious) backup else null
         } catch (e: Exception) {
@@ -164,6 +178,32 @@ internal class InstallExecutor(private val context: Context) {
                     }
                 }
                 return // best ABI only; the rest stay in the package
+            }
+        }
+    }
+
+    /**
+     * Extracts executable assets from `assets/exec/` entries, marking them
+     * `+x`. Android 10+ makes `filesDir` noexec, so a direct `execve` of a
+     * file here fails; the `ExecBridge` therefore prefers a dlopen bridge
+     * (loading the executable as a shared object and invoking its `main`)
+     * and falls back to `ProcessBuilder` only where the mount permits it.
+     * Extraction itself is deterministic and idempotent.
+     */
+    private fun extractExecutableAssets(apk: File, execDir: File) {
+        ZipFile(apk).use { zip ->
+            val entries = zip.entries().asSequence()
+                .filter { it.name.startsWith("assets/exec/") && !it.isDirectory }
+                .toList()
+            if (entries.isEmpty()) return
+            execDir.mkdirs()
+            for (entry in entries) {
+                val name = entry.name.substringAfterLast('/')
+                val out = File(execDir, name)
+                zip.getInputStream(entry).use { input ->
+                    FileOutputStream(out).use { output -> input.copyTo(output) }
+                }
+                out.setExecutable(true, false)
             }
         }
     }
@@ -265,6 +305,7 @@ internal class InstallExecutor(private val context: Context) {
         classes: List<String>,
         receivers: List<ReceiverSpec>,
         providers: List<ProviderSpec>,
+        capabilities: List<FfiCapability>,
     ): FfiPluginRecord = FfiPluginRecord(
         pluginId = metadata.packageName,
         name = metadata.name,
@@ -281,6 +322,7 @@ internal class InstallExecutor(private val context: Context) {
         classes = classes,
         staticReceiversJson = receivers.receiversToJsonOrNull(),
         providersJson = providers.providersToJsonOrNull(),
+        capabilities = capabilities,
     )
 
     private fun XmlResourceParser.attr(name: String): String? =

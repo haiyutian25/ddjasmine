@@ -3,6 +3,7 @@ package com.lhzkml.jasmine.core.plugin
 import android.app.Application
 import com.lhzkml.jasmine.core.plugin.crash.CrashHook
 import com.lhzkml.jasmine.core.plugin.crash.PluginCrashCallback
+import com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager
 import com.lhzkml.jasmine.core.plugin.proxy.ServiceProxyPool
 import com.lhzkml.jasmine.core.plugin.proxy.defaultServicePool
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +37,7 @@ open class PluginHostApplication : Application() {
             CrashHook.install(crashCallback)
         }
         ServiceProxyPool.configure(defaultServicePool)
+        ProcessIsolationManager.attach(this)
         CoroutineScope(Dispatchers.IO).launch {
             PluginHost.initialize(this@PluginHostApplication, pluginPolicy())
             onPluginFrameworkReady()()

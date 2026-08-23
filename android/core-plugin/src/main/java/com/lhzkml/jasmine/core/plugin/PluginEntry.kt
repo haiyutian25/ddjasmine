@@ -72,6 +72,21 @@ interface PluginEntry {
     fun onUnload()
 
     /**
+     * Called after [onLoad] when native libraries are extractable and the
+     * plugin may initialize heavy native state (inference engines, exec
+     * bridges). Runs before [MainScreen] is first composed. The default is a
+     * no-op so pure-JVM plugins pay nothing.
+     */
+    fun onNativeReady(context: PluginContext) {}
+
+    /**
+     * Called before [onUnload] to release heavy native state (engines,
+     * native heaps, exec sessions) that must be torn down while the class
+     * loader is still alive. Paired with [onNativeReady].
+     */
+    fun onNativeRelease() {}
+
+    /**
      * The plugin's main UI, rendered by the host after the user opens its
      * [menuEntry]. Runs entirely inside the host's Compose tree.
      */

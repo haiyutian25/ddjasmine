@@ -96,6 +96,13 @@
             android:name=".auth.PluginAuthorizationActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Isolated-process host for heavy-native plugins (MNN, Proot):
+             a crash or memory pressure here never drags the host down. -->
+        <service
+            android:name=".process.IsolatedPluginProcessService"
+            android:exported="false"
+            android:process=":plugin_isolated" />
     </application>
 
 </manifest>

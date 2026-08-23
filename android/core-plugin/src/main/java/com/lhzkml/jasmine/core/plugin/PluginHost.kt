@@ -10,6 +10,7 @@ import com.lhzkml.jasmine.core.plugin.internal.providersFromJson
 import com.lhzkml.jasmine.core.plugin.rust.FfiAccessRule
 import com.lhzkml.jasmine.core.plugin.rust.FfiAuditReport
 import com.lhzkml.jasmine.core.plugin.rust.FfiCallerIdentity
+import com.lhzkml.jasmine.core.plugin.rust.FfiCapability
 import com.lhzkml.jasmine.core.plugin.rust.FfiInstallRequest
 import com.lhzkml.jasmine.core.plugin.rust.FfiPluginRecord
 import com.lhzkml.jasmine.core.plugin.rust.FfiSignatureStrategy
@@ -93,6 +94,34 @@ object PluginHost {
             com.lhzkml.jasmine.core.plugin.update.PluginUpdateChannel(requireApp(), base)
         }
 
+    /**
+     * Asset-level downloader for heavy payloads that must not ride inside
+     * the APK (model files, rootfs tarballs). Resume + digest verification +
+     * disk quota; see [com.lhzkml.jasmine.core.plugin.update.AssetDownloader].
+     */
+    fun assetDownloader(): com.lhzkml.jasmine.core.plugin.update.AssetDownloader =
+        com.lhzkml.jasmine.core.plugin.update.AssetDownloader(requireApp())
+
+    /**
+     * Executable-asset runner (Proot-style user-space binaries). Launching is
+     * gated on the `EXEC` capability; see
+     * [com.lhzkml.jasmine.core.plugin.proxy.ExecBridge].
+     */
+    fun execBridge(): com.lhzkml.jasmine.core.plugin.proxy.ExecBridge =
+        com.lhzkml.jasmine.core.plugin.proxy.ExecBridge(requireApp())
+
+    /**
+     * Moves a plugin into the isolated `:plugin_isolated` process (heavy
+     * native / crash containment). See
+     * [com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager].
+     */
+    suspend fun isolatePlugin(pluginId: String): Boolean =
+        com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager.isolate(pluginId)
+
+    /** Releases a plugin's isolation (stops its private process). */
+    fun releaseIsolation(pluginId: String) =
+        com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager.release(pluginId)
+
     /** Checks and installs updates for every installed plugin (best effort). */
     suspend fun applyAvailableUpdates(): List<String> = withContext(Dispatchers.IO) {
         val channel = updateChannel() ?: return@withContext emptyList()
@@ -168,6 +197,7 @@ object PluginHost {
                 packageSha256 = packageSha256,
                 expectedSha256 = expectedSha256,
                 forceOverwrite = forceOverwrite,
+                capabilities = emptyList(),
             )
             when (val verdict = handle.adjudicateInstall(request)) {
                 FfiVerdict.Allow -> Unit
@@ -183,9 +213,43 @@ object PluginHost {
             val classes = com.lhzkml.jasmine.core.plugin.internal.DexScanner.scanClassNames(apk)
             val receivers = install.parseReceivers(apk)
             val providers = install.parseProviders(apk)
+
+            // Capability declaration: parse from metadata, adjudicate through
+            // the charter (escalate to user grant until each is authorized),
+            // then persist onto the record.
+            val capabilities = metadata.capabilities.mapNotNull { name ->
+                when (name) {
+                    "exec" -> FfiCapability.EXEC
+                    "gpu" -> FfiCapability.GPU
+                    "network" -> FfiCapability.NETWORK
+                    "storage" -> FfiCapability.STORAGE
+                    "camera" -> FfiCapability.CAMERA
+                    else -> null
+                }
+            }
+            if (capabilities.isNotEmpty()) {
+                when (val verdict = handle.adjudicateCapabilities(metadata.packageName, capabilities)) {
+                    FfiVerdict.Allow -> Unit
+                    is FfiVerdict.RequireUserGrant -> {
+                        val granted = authorizationHandler?.onAuthorization(
+                            AuthorizationPrompt(AuthorizationPrompt.Kind.Install, metadata.packageName, verdict.reason),
+                        ) == true
+                        if (granted) {
+                            capabilities.forEach {
+                                handle.recordGrant(metadata.packageName, "capability:${it.name.lowercase()}", true)
+                            }
+                        } else {
+                            throw InstallException("能力授权被拒绝: ${metadata.packageName}")
+                        }
+                    }
+                    is FfiVerdict.Deny -> throw InstallException("能力被拒绝: ${verdict.reason}")
+                }
+            }
+
             val backup = install.placePayload(metadata.packageName, apk, classes)
             val record = install.buildRecord(
                 metadata, request.signatureDigests, packageSha256, classes, receivers, providers,
+                capabilities,
             )
             try {
                 handle.commitInstall(record)
@@ -349,6 +413,27 @@ object PluginHost {
                 granted
             }
         }
+    }
+
+    /**
+     * Gates a declared capability at runtime (exec / gpu / network / storage
+     * / camera). The plugin must have declared it at install and hold a user
+     * grant; otherwise the call escalates through the authorization handler.
+     * A `null` caller means the host itself (explicit allow).
+     */
+    suspend fun checkCapability(
+        capability: FfiCapability,
+        callerPluginId: String?,
+        hardFail: Boolean = false,
+    ): Boolean {
+        val permissionKey = "capability:${capability.name.lowercase()}"
+        return checkApi(
+            rule = ApiRule.SelfOrHost,
+            callerPluginId = callerPluginId,
+            targetPluginId = callerPluginId ?: "",
+            permissionKey = permissionKey,
+            hardFail = hardFail,
+        )
     }
 
     // --- proxy support (internal to the runtime) ----------------------------

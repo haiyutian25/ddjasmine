@@ -42,6 +42,34 @@ pub enum PermissionLevel {
     L4,
 }
 
+/// A capability a plugin may declare at install. Sensitive capabilities are
+/// adjudicated at install (user grant, cached per plugin) and gateable at
+/// runtime through `check_api_access` using `capability:<name>` as the
+/// permission key. This is the framework's mechanism for heavy-native
+/// facilities (Proot's exec, MNN's GPU/network) to declare — and be gated
+/// on — what they need instead of running free.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Capability {
+    /// Execute ELF binaries (Proot-style user-space Linux).
+    Exec,
+    /// GPU / accelerator inference (MNN OpenCL/Vulkan backends).
+    Gpu,
+    /// Network access (model / rootfs download).
+    Network,
+    /// Extended storage access (large rootfs payloads).
+    Storage,
+    /// Camera access.
+    Camera,
+}
+
+impl Capability {
+    /// The permission key used by the grant cache and runtime gates.
+    #[must_use]
+    pub fn permission_key(self) -> String {
+        format!("capability:{self:?}")
+    }
+}
+
 /// How a signature-gate failure is adjudicated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignatureStrategy {
@@ -115,6 +143,9 @@ pub struct InstallRequest {
     /// Skips the downgrade ban (explicit host override). Signature gates
     /// still apply.
     pub force_overwrite: bool,
+    /// Capabilities the package declares it needs. Sensitive ones escalate
+    /// to a user grant at install and are gateable at runtime.
+    pub capabilities: Vec<Capability>,
 }
 
 /// The installed record an update would replace.
@@ -279,6 +310,37 @@ impl Charter {
         }
     }
 
+    /// Adjudicates a plugin's declared capabilities at install. Every
+    /// declared capability is sensitive: an unauthorized one escalates to a
+    /// user grant (with the pending set in the reason), and a previously
+    /// cached grant settles it without re-prompting. An empty declaration
+    /// passes trivially.
+    #[must_use]
+    pub fn adjudicate_capabilities(
+        &self,
+        plugin_id: &str,
+        capabilities: &[Capability],
+    ) -> Verdict {
+        let mut pending = Vec::new();
+        for capability in capabilities {
+            let granted = self
+                .grants
+                .get(&(plugin_id.to_string(), capability.permission_key()))
+                .copied()
+                == Some(true);
+            if !granted {
+                pending.push(format!("{capability:?}"));
+            }
+        }
+        if pending.is_empty() {
+            Verdict::Allow
+        } else {
+            Verdict::RequireUserGrant {
+                reason: format!("插件请求敏感能力: {}", pending.join(", ")),
+            }
+        }
+    }
+
     /// Records the user's answer to an authorization prompt.
     pub fn record_grant(&mut self, plugin_id: &str, permission_key: &str, granted: bool) {
         self.grants
@@ -311,6 +373,7 @@ mod tests {
             package_sha256: "dd".to_string(),
             expected_sha256: None,
             force_overwrite: false,
+            capabilities: Vec::new(),
         }
     }
 
@@ -319,6 +382,37 @@ mod tests {
             version_code: version,
             signature_digests: signers.iter().map(ToString::to_string).collect(),
         }
+    }
+
+    #[test]
+    fn capability_adjudication_escalates_and_caches() {
+        let mut c = charter();
+        // Empty declaration passes trivially.
+        assert_eq!(c.adjudicate_capabilities("p", &[]), Verdict::Allow);
+        // An unauthorized capability escalates, naming the pending set.
+        match c.adjudicate_capabilities("p", &[Capability::Gpu, Capability::Network]) {
+            Verdict::RequireUserGrant { reason } => {
+                assert!(reason.contains("Gpu") && reason.contains("Network"));
+            }
+            other => panic!("expected RequireUserGrant, got {other:?}"),
+        }
+        // Granting one capability settles only that one.
+        c.record_grant("p", &Capability::Gpu.permission_key(), true);
+        match c.adjudicate_capabilities("p", &[Capability::Gpu]) {
+            Verdict::Allow => {}
+            other => panic!("expected Allow after grant, got {other:?}"),
+        }
+        // The ungranted one still escalates.
+        assert!(matches!(
+            c.adjudicate_capabilities("p", &[Capability::Network]),
+            Verdict::RequireUserGrant { .. }
+        ));
+        // Dropping the plugin revokes the cached grant.
+        c.drop_plugin("p");
+        assert!(matches!(
+            c.adjudicate_capabilities("p", &[Capability::Gpu]),
+            Verdict::RequireUserGrant { .. }
+        ));
     }
 
     #[test]
