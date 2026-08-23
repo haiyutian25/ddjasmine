@@ -24,7 +24,7 @@ plugins {
 
 android {
     namespace = "com.lhzkml.jasmine.feature.session"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 26

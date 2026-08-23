@@ -25,7 +25,7 @@ plugins {
 
 android {
     namespace = "com.lhzkml.jasmine"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.lhzkml.jasmine"

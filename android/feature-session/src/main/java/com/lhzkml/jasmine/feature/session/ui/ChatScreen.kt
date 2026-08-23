@@ -69,7 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lhzkml.jasmine.core.ui.InkBlack
 import com.lhzkml.jasmine.feature.session.R
 import com.mikepenz.markdown.m3.Markdown
-import com.mikepenz.markdown.model.rememberMarkdownState
+import com.mikepenz.markdown.model.rememberStreamingMarkdownState
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -359,16 +359,22 @@ private fun StreamingAssistantBlock(reasoning: String, text: String) {
 }
 
 /**
- * Renders the growing reply as Markdown in real time. `retainState` keeps
- * the previous successful render while the next parse runs, so the row's
- * height never collapses to the loading state mid-stream — that collapse
- * used to reset the list anchoring and trip the follow-pause detection.
- * The parser runs async and conflates rapid deltas.
+ * Streams the growing reply into the renderer: only the appended slice is
+ * fed in, so finished blocks above the unstable tail keep their layout —
+ * the renderer's native streaming state re-parses just the tail, not the
+ * whole document, on every delta.
  */
 @Composable
 private fun StreamingMarkdown(text: String) {
-    val mdState = rememberMarkdownState(content = text, retainState = true)
-    Markdown(markdownState = mdState)
+    val mdState = rememberStreamingMarkdownState()
+    var fedLength by remember { mutableStateOf(0) }
+    LaunchedEffect(text) {
+        if (text.length > fedLength) {
+            mdState.append(text.substring(fedLength))
+            fedLength = text.length
+        }
+    }
+    Markdown(streamingMarkdownState = mdState)
 }
 
 @Composable

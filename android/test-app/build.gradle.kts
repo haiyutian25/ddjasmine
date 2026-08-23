@@ -25,7 +25,7 @@ plugins {
 
 android {
     namespace = "com.lhzkml.jasmine.test.app"
-    compileSdk = 36
+    compileSdk = 37
     targetProjectPath = ":app"
 
     defaultConfig {

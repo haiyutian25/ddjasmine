@@ -23,7 +23,7 @@ plugins {
 
 android {
     namespace = "com.lhzkml.jasmine.core.testing"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 26
