@@ -16,6 +16,9 @@ import com.lhzkml.jasmine.core.plugin.rust.FfiSignatureStrategy
 import com.lhzkml.jasmine.core.plugin.rust.FfiVerdict
 import com.lhzkml.jasmine.core.plugin.rust.PluginCoreHandle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -103,6 +106,16 @@ object PluginHost {
     val isInitialized: Boolean get() = core != null
 
     /**
+     * Reactive view of every loaded plugin's settings-list menu entry
+     * (pluginId → entry). Emits on load/unload, so the host's settings list
+     * adds/removes plugin entries dynamically.
+     */
+    private val _loadedMenuEntries =
+        MutableStateFlow<Map<String, PluginMenuEntry>>(emptyMap())
+    val loadedMenuEntries: StateFlow<Map<String, PluginMenuEntry>> =
+        _loadedMenuEntries.asStateFlow()
+
+    /**
      * Opens the decision core (recovering crash-interrupted ledger
      * rotations) and loads every enabled plugin.
      */
@@ -122,11 +135,13 @@ object PluginHost {
                 libDir = install::libDir,
                 failureCallback = loadFailureCallback,
             )
+            lc.onChange = { refreshMenuEntries(lc) }
             core = handle
             executor = install
             lifecycle = lc
             app = application
             lc.loadEnabled(handle.allRecords())
+            refreshMenuEntries(lc)
         }
     }
 
@@ -366,4 +381,10 @@ object PluginHost {
         lifecycle ?: error("PluginHost 未初始化")
 
     private fun requireApp(): Application = app ?: error("PluginHost 未初始化")
+
+    private fun refreshMenuEntries(lc: com.lhzkml.jasmine.core.plugin.internal.LifecycleExecutor) {
+        _loadedMenuEntries.value = lc.loadedPlugins.mapNotNull { (pluginId, plugin) ->
+            plugin.entry.menuEntry?.let { pluginId to it }
+        }.toMap()
+    }
 }

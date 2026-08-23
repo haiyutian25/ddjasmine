@@ -6,6 +6,7 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
+import com.lhzkml.jasmine.feature.plugin.navigation.PluginContent
 import com.lhzkml.jasmine.feature.plugin.navigation.PluginEntryProvider
 import com.lhzkml.jasmine.feature.plugin.navigation.PluginList
 import com.lhzkml.jasmine.feature.session.navigation.Chat
@@ -40,6 +41,9 @@ fun JasmineNavigation() {
                 SettingsScreen(
                     onOpenPlugins = { backStack.add(PluginList) },
                     onOpenProviderSettings = { backStack.add(ProviderList) },
+                    onOpenPluginContent = { pluginId ->
+                        backStack.add(PluginContent(pluginId = pluginId))
+                    },
                 )
             }
             entry<ProviderList> {

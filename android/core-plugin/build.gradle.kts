@@ -20,6 +20,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.compose.compiler)
 }
 
 android {
@@ -32,6 +33,7 @@ android {
     }
 
     buildFeatures {
+        compose = true
         aidl = false
         buildConfig = false
         shaders = false
@@ -100,6 +102,10 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+
+    // 插件 UI 契约：@Composable 注解（api 使插件 compileOnly 时可见）
+    api(platform(libs.androidx.compose.bom))
+    api(libs.androidx.compose.runtime)
 
     // Runtime DEX class-index scan (build-time scan is the primary source);
     // dexlib2's API surface exposes guava types, so guava must be explicit.

@@ -16,20 +16,25 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lhzkml.jasmine.core.plugin.PluginHost
 
 /**
- * Settings skeleton: the container every management page (models,
- * credentials, MCP servers, permissions) will live in. Rows are placeholders
- * until their UI ships per UI-FEATURES.md.
+ * Settings: the container every management page (models, providers, MCP
+ * servers, permissions) will live in. Plugin menu entries declared by
+ * loaded plugins appear dynamically below the plugin manager.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onOpenPlugins: () -> Unit = {},
     onOpenProviderSettings: () -> Unit = {},
+    onOpenPluginContent: (String) -> Unit = {},
 ) {
+    val menuEntries by PluginHost.loadedMenuEntries.collectAsStateWithLifecycle()
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = { TopAppBar(title = { Text("设置") }) },
@@ -46,7 +51,6 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text("模型供应商", style = MaterialTheme.typography.titleMedium)
-                        Text(">", color = MaterialTheme.colorScheme.secondary)
                     }
                 }
             }
@@ -57,7 +61,26 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text("插件管理", style = MaterialTheme.typography.titleMedium)
-                        Text(">", color = MaterialTheme.colorScheme.secondary)
+                    }
+                }
+            }
+            // 插件激活后动态出现的菜单入口
+            items(menuEntries.entries.toList(), key = { it.key }) { (pluginId, entry) ->
+                Card(Modifier.fillMaxWidth().clickable(onClick = { onOpenPluginContent(pluginId) })) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(entry.title, style = MaterialTheme.typography.titleMedium)
+                            entry.subtitle?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                )
+                            }
+                        }
                     }
                 }
             }

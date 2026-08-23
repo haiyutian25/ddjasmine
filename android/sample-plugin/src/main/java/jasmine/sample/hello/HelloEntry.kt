@@ -4,8 +4,23 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import com.lhzkml.jasmine.core.plugin.PluginContext
 import com.lhzkml.jasmine.core.plugin.PluginEntry
+import com.lhzkml.jasmine.core.plugin.PluginMenuEntry
 import com.lhzkml.jasmine.core.plugin.ServiceKey
 import com.lhzkml.jasmine.core.plugin.ServiceTable
 import com.lhzkml.jasmine.core.plugin.component.BasePluginActivity
@@ -27,6 +42,12 @@ class HelloEntry : PluginEntry {
         Greeter.KEY to Greeter { "来自 Hello 插件的问候" },
     )
 
+    /** 激活后动态出现在宿主设置列表的菜单入口。 */
+    override val menuEntry: PluginMenuEntry = PluginMenuEntry(
+        title = "Hello 示例插件",
+        subtitle = "演示插件主界面（Compose）",
+    )
+
     override fun onLoad(context: PluginContext) {
         Log.i(TAG, "onLoad: dir=${context.pluginDir}")
         // Prove the injected per-plugin resources resolve.
@@ -38,6 +59,30 @@ class HelloEntry : PluginEntry {
 
     override fun onUnload() {
         Log.i(TAG, "onUnload")
+    }
+
+    /** 点击菜单入口后由宿主渲染的插件主界面。 */
+    @Composable
+    override fun Content() {
+        val context = LocalContext.current
+        Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text("Hello 插件主界面", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "这个界面由插件自己的 Content() 提供，宿主设置列表点击后动态进入",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = {
+                Toast.makeText(context, "来自插件的按钮", Toast.LENGTH_SHORT).show()
+            }) {
+                Text("点击我")
+            }
+        }
     }
 
     private companion object {

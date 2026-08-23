@@ -38,6 +38,10 @@ internal class LifecycleExecutor(
     private val loaded = ConcurrentHashMap<String, LoadedPlugin>()
     private val serviceTables = ConcurrentHashMap<String, Map<ServiceKey<*>, Any>>()
 
+    /** Invoked whenever the loaded set changes (load/unload), so the host
+     *  can recompute reactive views like the dynamic menu entries. */
+    var onChange: (() -> Unit)? = null
+
     val loadedPlugins: Map<String, LoadedPlugin> get() = loaded
 
     fun isLoaded(pluginId: String): Boolean = loaded.containsKey(pluginId)
@@ -86,6 +90,7 @@ internal class LifecycleExecutor(
             loaded[pluginId] = LoadedPlugin(record, classLoader, entry, resources)
             serviceTables[pluginId] = entry.services
             registerComponents(record)
+            onChange?.invoke()
         } catch (e: Throwable) {
             loaded.remove(pluginId)
             serviceTables.remove(pluginId)
@@ -105,6 +110,7 @@ internal class LifecycleExecutor(
             failureCallback?.onFailure(pluginId, "unload", e)
         }
         core.pluginUnloaded(pluginId)
+        onChange?.invoke()
     }
 
     /** Loads every enabled, not-yet-loaded plugin; any failure rolls back the batch. */

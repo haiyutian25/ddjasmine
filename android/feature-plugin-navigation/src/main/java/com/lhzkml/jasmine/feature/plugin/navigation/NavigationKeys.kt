@@ -21,3 +21,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data object PluginList : NavKey
+
+/** 通用插件内容目的地：点击某个插件的动态菜单入口后进入。 */
+@Serializable
+data class PluginContent(val pluginId: String) : NavKey

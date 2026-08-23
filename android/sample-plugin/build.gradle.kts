@@ -26,6 +26,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.android.library)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.compose.compiler)
     id("jasmine.plugin-pack")
 }
 
@@ -44,6 +45,7 @@ android {
     }
 
     buildFeatures {
+        compose = true
         aidl = false
         buildConfig = false
         shaders = false
@@ -65,6 +67,13 @@ dependencies {
     compileOnly(project(":core-plugin"))
     compileOnly(libs.androidx.activity)
     implementation(libs.androidx.core.ktx)
+
+    // 插件 UI 在运行时经父 ClassLoader 从宿主解析，故 compileOnly
+    val composeBom = platform(libs.androidx.compose.bom)
+    compileOnly(composeBom)
+    compileOnly(libs.androidx.compose.ui)
+    compileOnly(libs.androidx.compose.foundation)
+    compileOnly(libs.androidx.compose.material3)
 
     ksp(project(":core-plugin-ksp"))
 }
