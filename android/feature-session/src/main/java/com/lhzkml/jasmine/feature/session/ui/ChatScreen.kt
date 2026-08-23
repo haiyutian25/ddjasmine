@@ -14,15 +14,23 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -33,6 +41,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -47,14 +56,11 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,7 +71,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -188,14 +193,21 @@ fun ChatScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(state.entries, key = { it.id }) { entry ->
-                    ChatEntryItem(entry)
+                itemsIndexed(state.entries, key = { _, entry -> entry.id }) { index, entry ->
+                    // The user message this assistant turn answers: the
+                    // latest user entry above the current index.
+                    val userRequest = state.entries
+                        .subList(0, index)
+                        .lastOrNull { it.fromUser }
+                        ?.content.orEmpty()
+                    ChatEntryItem(entry, userRequest = userRequest)
                 }
                 if (state.sending) {
                     item(key = "streaming") {
                         StreamingAssistantBlock(
                             reasoning = state.streamingReasoning.orEmpty(),
                             text = state.streamingText.orEmpty(),
+                            userRequest = state.entries.lastOrNull { it.fromUser }?.content.orEmpty(),
                         )
                     }
                 }
@@ -285,13 +297,13 @@ private fun ThreeDotPulse() {
 }
 
 @Composable
-private fun ChatEntryItem(entry: ChatEntry) {
+private fun ChatEntryItem(entry: ChatEntry, userRequest: String) {
     if (entry.fromUser) {
         MessageBlock(fromUser = true, content = entry.content, timeMs = entry.timeMs)
     } else {
         Column(Modifier.fillMaxWidth()) {
             entry.reasoning?.let { reasoning ->
-                CollapsibleReasoning(reasoning = reasoning)
+                CollapsibleReasoning(reasoning = reasoning, userRequest = userRequest)
             }
             MessageBlock(fromUser = false, content = entry.content, timeMs = entry.timeMs)
         }
@@ -300,13 +312,19 @@ private fun ChatEntryItem(entry: ChatEntry) {
 
 /**
  * The thinking block in the Qwen style: a light rounded pill — bulb icon,
- * "思考中" (pulsing) or "已完成思考" (steady) label, and a chevron ">" that
- * rotates down when expanded. Tapping grows the reasoning text out of the
- * header's bottom edge (expandVertically).
+ * "思考中" (pulsing) or "已完成思考" (steady) label, and a chevron ">". Tapping
+ * opens the reasoning as an independent bottom sheet (drag handle included)
+ * showing a timeline: the user's request, then the thinking content, then
+ * the finished-thinking mark.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CollapsibleReasoning(reasoning: String, streaming: Boolean = false) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
+private fun CollapsibleReasoning(
+    reasoning: String,
+    streaming: Boolean = false,
+    userRequest: String = "",
+) {
+    var showSheet by rememberSaveable { mutableStateOf(false) }
     val pulse = rememberInfiniteTransition(label = "thinking")
     val bulbAlpha by pulse.animateFloat(
         initialValue = 0.35f,
@@ -322,7 +340,7 @@ private fun CollapsibleReasoning(reasoning: String, streaming: Boolean = false) 
         Surface(
             shape = RoundedCornerShape(10.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            modifier = Modifier.clickable { expanded = !expanded },
+            modifier = Modifier.clickable { showSheet = true },
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -346,21 +364,116 @@ private fun CollapsibleReasoning(reasoning: String, streaming: Boolean = false) 
                     imageVector = Icons.Filled.ChevronRight,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier
-                        .size(18.dp)
-                        .graphicsLayer { rotationZ = if (expanded) 90f else 0f },
+                    modifier = Modifier.size(18.dp),
                 )
             }
         }
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandVertically(),
-            exit = shrinkVertically(),
+    }
+    if (showSheet) {
+        ModalBottomSheet(onDismissRequest = { showSheet = false }) {
+            ThinkingSheetContent(
+                userRequest = userRequest,
+                reasoning = reasoning,
+                streaming = streaming,
+                bulbAlpha = bulbAlpha,
+            )
+        }
+    }
+}
+
+/**
+ * The reasoning sheet body: a left-rail timeline — the user's request
+ * first, then the thinking content, closed by the finished-thinking mark.
+ */
+@Composable
+private fun ThinkingSheetContent(
+    userRequest: String,
+    reasoning: String,
+    streaming: Boolean,
+    bulbAlpha: Float,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 28.dp),
+    ) {
+        TimelineStep(
+            label = "用户需求",
+            content = userRequest,
+            showStem = true,
+        )
+        TimelineStep(
+            label = "思考过程",
+            content = reasoning,
+            showStem = false,
+        )
+        Row(
+            modifier = Modifier.padding(start = 2.dp, top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(
+                imageVector = Icons.Filled.Lightbulb,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary
+                    .copy(alpha = if (streaming) bulbAlpha else 1f),
+                modifier = Modifier.size(16.dp),
+            )
             Text(
-                reasoning,
-                style = MaterialTheme.typography.bodyMedium,
+                if (streaming) stringResource(R.string.chat_thinking_label)
+                else stringResource(R.string.chat_reasoning_done_label),
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.tertiary,
+            )
+        }
+    }
+}
+
+/**
+ * One timeline entry: a dot on the left rail, an optional connecting stem
+ * below it, and the step's label plus content to the right.
+ */
+@Composable
+private fun TimelineStep(label: String, content: String, showStem: Boolean) {
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .padding(start = 4.dp)
+                .width(14.dp)
+                .fillMaxHeight(),
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 5.dp)
+                    .size(8.dp)
+                    .background(MaterialTheme.colorScheme.tertiary, CircleShape),
+            )
+            if (showStem) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 3.dp)
+                        .width(2.dp)
+                        .fillMaxHeight()
+                        .background(
+                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f),
+                        ),
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.padding(bottom = 18.dp)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                content,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
@@ -375,12 +488,12 @@ private fun CollapsibleReasoning(reasoning: String, streaming: Boolean = false) 
  * so the page-level waiting animation shows.
  */
 @Composable
-private fun StreamingAssistantBlock(reasoning: String, text: String) {
+private fun StreamingAssistantBlock(reasoning: String, text: String, userRequest: String) {
     if (reasoning.isEmpty() && text.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
         if (reasoning.isNotEmpty()) {
             // The thinking phase is over once body text starts arriving.
-            CollapsibleReasoning(reasoning = reasoning, streaming = text.isEmpty())
+            CollapsibleReasoning(reasoning = reasoning, streaming = text.isEmpty(), userRequest = userRequest)
         }
         if (text.isNotEmpty()) {
             StreamingMarkdown(text)
