@@ -6,6 +6,7 @@ members = [
     "measure",
     "compose",
     "codec",
+    "plugin-core",
     "ffi",
     "uniffi-bindgen",
 ]

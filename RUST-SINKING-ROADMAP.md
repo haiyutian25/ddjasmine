@@ -120,9 +120,10 @@
     响应配对——TS/Python 已双实现，Rust 做第三方共享规范。
 - [ ] **P2-5 web policy 四件**：`validateFetchUrl`/`isSameOrigin`/
   `classifyContentType`/`parseCharset`。
-- [ ] **P2-6 小随迁**：atomic-write/withFileLock、home-paths、identity UUID v4
-  协议、`renderSkillContent` wire 形状 + frontmatter 解析、file-reference 语法、
-  session-reference URI、attachment `sha256:` 校验/base64 canonical/displayName。
+- [~] **P2-6 小随迁**：~~atomic-write~~ **已落地** → `store/src/atomic_write.rs`
+  （tmp→fsync→rename→bak 轮换 + 读侧恢复，供 plugin-core ledger 复用）；余项：withFileLock、
+  home-paths、identity UUID v4 协议、`renderSkillContent` wire 形状 + frontmatter 解析、
+  file-reference 语法、session-reference URI、attachment `sha256:` 校验/base64 canonical/displayName。
 
 ## 明确不沉（记录结论，防止重复评估）
 

@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+mod atomic_write;
+pub use atomic_write::{atomic_write, read_atomic, read_backup};
+
 /// Errors of the storage backends.
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -26,6 +29,17 @@ pub enum StoreError {
         path: PathBuf,
         /// Original IO error.
         source: io::Error,
+    },
+    /// Atomic-write rotation failed and restoring the backup failed too;
+    /// both errors are reported because the old content may be stranded.
+    #[error("atomic write to {path} failed ({source}); rollback also failed ({rollback_source})")]
+    AtomicWriteRollback {
+        /// Path of the target file.
+        path: PathBuf,
+        /// Failure of the rename into place.
+        source: io::Error,
+        /// Failure of the backup restore.
+        rollback_source: io::Error,
     },
 }
 

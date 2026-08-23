@@ -15,6 +15,11 @@ use std::sync::{Arc, Mutex};
 
 use codec::{SseEvent, SseParser};
 use compose::{EntryRow, PatchLayer};
+use plugin_core::{
+    AccessRule, AuditDrift, CallerIdentity, CoreError, CrashVerdict, DependencyFailure,
+    ExceptionFrame, InstallRequest, IntentFilter, IntentQuery, LocateOutcome, PluginCore,
+    PluginRecord, ProviderSpec, SignatureStrategy, StaticReceiver, Verdict,
+};
 use session_log::{LogError, ModelMessage, SessionEvent, SessionHeader, SessionLog};
 use store::JsonlStore;
 
@@ -562,6 +567,776 @@ pub fn epoch_header_equals_json(a_json: String, b_json: String) -> Result<bool, 
     ))
 }
 
+// ---------------------------------------------------------------------------
+// Plugin framework core (plan-style: every call returns a complete decision)
+// ---------------------------------------------------------------------------
+
+/// FFI mirror of [`SignatureStrategy`].
+#[derive(uniffi::Enum)]
+pub enum FfiSignatureStrategy {
+    /// Signature mismatch rejects outright.
+    Strict,
+    /// Signature mismatch escalates to a user grant.
+    UserGrant,
+    /// Signature mismatch ignored (development only).
+    Insecure,
+}
+
+impl From<FfiSignatureStrategy> for SignatureStrategy {
+    fn from(s: FfiSignatureStrategy) -> Self {
+        match s {
+            FfiSignatureStrategy::Strict => SignatureStrategy::Strict,
+            FfiSignatureStrategy::UserGrant => SignatureStrategy::UserGrant,
+            FfiSignatureStrategy::Insecure => SignatureStrategy::Insecure,
+        }
+    }
+}
+
+/// FFI mirror of [`AccessRule`].
+#[derive(uniffi::Enum)]
+pub enum FfiAccessRule {
+    /// Caller's signature must equal the host's.
+    Host,
+    /// Caller must be the target plugin itself, or carry the host signature.
+    SelfOrHost,
+    /// Any installed plugin may call.
+    AnyPlugin,
+}
+
+impl From<FfiAccessRule> for AccessRule {
+    fn from(r: FfiAccessRule) -> Self {
+        match r {
+            FfiAccessRule::Host => AccessRule::Host,
+            FfiAccessRule::SelfOrHost => AccessRule::SelfOrHost,
+            FfiAccessRule::AnyPlugin => AccessRule::AnyPlugin,
+        }
+    }
+}
+
+/// FFI mirror of [`CallerIdentity`]; attribution itself stays on the JVM
+/// side, only the conclusion crosses.
+#[derive(uniffi::Enum)]
+pub enum FfiCallerIdentity {
+    /// The host application.
+    Host,
+    /// An installed plugin.
+    Plugin {
+        /// Plugin id.
+        plugin_id: String,
+        /// SHA-256 digests of its signing certificates, lowercase hex.
+        signature_digests: Vec<String>,
+    },
+    /// Attribution failed; never silently allowed.
+    Unknown,
+}
+
+impl From<FfiCallerIdentity> for CallerIdentity {
+    fn from(c: FfiCallerIdentity) -> Self {
+        match c {
+            FfiCallerIdentity::Host => CallerIdentity::Host,
+            FfiCallerIdentity::Plugin {
+                plugin_id,
+                signature_digests,
+            } => CallerIdentity::Plugin {
+                plugin_id,
+                signature_digests,
+            },
+            FfiCallerIdentity::Unknown => CallerIdentity::Unknown,
+        }
+    }
+}
+
+/// FFI mirror of [`Verdict`].
+#[derive(uniffi::Enum)]
+pub enum FfiVerdict {
+    /// Proceed.
+    Allow,
+    /// Proceed only after the user grants authorization.
+    RequireUserGrant {
+        /// Human-readable reason for the escalation.
+        reason: String,
+    },
+    /// Refuse.
+    Deny {
+        /// Human-readable reason for the refusal.
+        reason: String,
+    },
+}
+
+impl From<Verdict> for FfiVerdict {
+    fn from(v: Verdict) -> Self {
+        match v {
+            Verdict::Allow => FfiVerdict::Allow,
+            Verdict::RequireUserGrant { reason } => FfiVerdict::RequireUserGrant { reason },
+            Verdict::Deny { reason } => FfiVerdict::Deny { reason },
+        }
+    }
+}
+
+/// FFI mirror of [`InstallRequest`].
+#[derive(uniffi::Record)]
+pub struct FfiInstallRequest {
+    /// Plugin id from the package metadata.
+    pub plugin_id: String,
+    /// Monotonic version code.
+    pub version_code: u64,
+    /// SHA-256 digests of the package's signing certificates, lowercase hex.
+    pub signature_digests: Vec<String>,
+    /// SHA-256 digest of the package bytes, lowercase hex.
+    pub package_sha256: String,
+    /// Digest published by the update channel; verified when present.
+    pub expected_sha256: Option<String>,
+    /// Skips the downgrade ban only; signature gates still apply.
+    pub force_overwrite: bool,
+}
+
+impl From<FfiInstallRequest> for InstallRequest {
+    fn from(r: FfiInstallRequest) -> Self {
+        InstallRequest {
+            plugin_id: r.plugin_id,
+            version_code: r.version_code,
+            signature_digests: r.signature_digests,
+            package_sha256: r.package_sha256,
+            expected_sha256: r.expected_sha256,
+            force_overwrite: r.force_overwrite,
+        }
+    }
+}
+
+/// FFI mirror of [`PluginRecord`].
+#[derive(uniffi::Record)]
+pub struct FfiPluginRecord {
+    /// Plugin id from the package metadata.
+    pub plugin_id: String,
+    /// Display name (application label).
+    pub name: String,
+    /// Launcher icon resource id, when declared.
+    pub icon_res_id: Option<u32>,
+    /// Monotonic version code.
+    pub version_code: u64,
+    /// Human-readable version.
+    pub version_name: String,
+    /// Fully-qualified entry class name (`plugin.entryClass` meta-data).
+    pub entry_class: String,
+    /// Free-form description (`plugin.description` meta-data).
+    pub description: String,
+    /// SHA-256 digests of the signing certificates, lowercase hex.
+    pub signature_digests: Vec<String>,
+    /// SHA-256 digest of the package bytes, lowercase hex.
+    pub package_sha256: String,
+    /// Directory the package payload was installed into.
+    pub install_path: String,
+    /// Disabled plugins stay registered but are skipped at load.
+    pub enabled: bool,
+    /// Install time, milliseconds since the Unix epoch.
+    pub installed_at_ms: i64,
+    /// Classes this plugin provides (build-time DEX scan output).
+    pub classes: Vec<String>,
+    /// Static receivers parsed at install, serialized as JSON.
+    pub static_receivers_json: Option<String>,
+    /// Content providers parsed at install, serialized as JSON.
+    pub providers_json: Option<String>,
+}
+
+impl From<FfiPluginRecord> for PluginRecord {
+    fn from(r: FfiPluginRecord) -> Self {
+        PluginRecord {
+            plugin_id: r.plugin_id,
+            name: r.name,
+            icon_res_id: r.icon_res_id,
+            version_code: r.version_code,
+            version_name: r.version_name,
+            entry_class: r.entry_class,
+            description: r.description,
+            signature_digests: r.signature_digests,
+            package_sha256: r.package_sha256,
+            install_path: r.install_path,
+            enabled: r.enabled,
+            installed_at_ms: r.installed_at_ms,
+            classes: r.classes.into_iter().collect(),
+            static_receivers_json: r.static_receivers_json,
+            providers_json: r.providers_json,
+        }
+    }
+}
+
+impl From<PluginRecord> for FfiPluginRecord {
+    fn from(r: PluginRecord) -> Self {
+        FfiPluginRecord {
+            plugin_id: r.plugin_id,
+            name: r.name,
+            icon_res_id: r.icon_res_id,
+            version_code: r.version_code,
+            version_name: r.version_name,
+            entry_class: r.entry_class,
+            description: r.description,
+            signature_digests: r.signature_digests,
+            package_sha256: r.package_sha256,
+            install_path: r.install_path,
+            enabled: r.enabled,
+            installed_at_ms: r.installed_at_ms,
+            classes: r.classes.into_iter().collect(),
+            static_receivers_json: r.static_receivers_json,
+            providers_json: r.providers_json,
+        }
+    }
+}
+
+/// FFI mirror of [`LocateOutcome`].
+#[derive(uniffi::Enum)]
+pub enum FfiLocateOutcome {
+    /// The class is provided by this installed plugin.
+    Plugin {
+        /// Providing plugin id.
+        plugin_id: String,
+    },
+    /// Index missed; try the host class loader before failing the load.
+    HostFallback,
+}
+
+impl From<LocateOutcome> for FfiLocateOutcome {
+    fn from(o: LocateOutcome) -> Self {
+        match o {
+            LocateOutcome::Plugin { plugin_id } => FfiLocateOutcome::Plugin { plugin_id },
+            LocateOutcome::HostFallback => FfiLocateOutcome::HostFallback,
+        }
+    }
+}
+
+/// FFI mirror of `RestartPlan`.
+#[derive(uniffi::Record)]
+pub struct FfiRestartPlan {
+    /// The plugin whose update triggered the plan.
+    pub plugin_id: String,
+    /// Affected plugins in dependency order (root first) — reload order.
+    pub reload_order: Vec<String>,
+    /// The exact reverse — unload order.
+    pub unload_order: Vec<String>,
+}
+
+/// FFI mirror of [`AuditDrift`].
+#[derive(uniffi::Enum)]
+pub enum FfiAuditDrift {
+    /// Index points at a plugin that is not registered.
+    IndexTargetsUnknownPlugin {
+        /// The indexed class.
+        class: String,
+        /// The plugin id the index names.
+        plugin_id: String,
+    },
+    /// The owning record no longer lists the indexed class.
+    IndexEntryStale {
+        /// The indexed class.
+        class: String,
+        /// The plugin the index names.
+        plugin_id: String,
+    },
+    /// A record lists a class the index does not reflect.
+    RecordClassUnindexed {
+        /// The owning plugin.
+        plugin_id: String,
+        /// The missing/mispointed class.
+        class: String,
+    },
+    /// Index points at an installed plugin that is not loaded (informational).
+    IndexTargetNotLoaded {
+        /// The indexed class.
+        class: String,
+        /// The plugin the index names.
+        plugin_id: String,
+    },
+}
+
+impl From<AuditDrift> for FfiAuditDrift {
+    fn from(d: AuditDrift) -> Self {
+        match d {
+            AuditDrift::IndexTargetsUnknownPlugin { class, plugin_id } => {
+                FfiAuditDrift::IndexTargetsUnknownPlugin { class, plugin_id }
+            }
+            AuditDrift::IndexEntryStale { class, plugin_id } => {
+                FfiAuditDrift::IndexEntryStale { class, plugin_id }
+            }
+            AuditDrift::RecordClassUnindexed { plugin_id, class } => {
+                FfiAuditDrift::RecordClassUnindexed { plugin_id, class }
+            }
+            AuditDrift::IndexTargetNotLoaded { class, plugin_id } => {
+                FfiAuditDrift::IndexTargetNotLoaded { class, plugin_id }
+            }
+        }
+    }
+}
+
+/// Three-way reconciliation report (registry ↔ index ↔ loaded set).
+#[derive(uniffi::Record)]
+pub struct FfiAuditReport {
+    /// Every drift found, in deterministic order.
+    pub drifts: Vec<FfiAuditDrift>,
+    /// True when no actionable drift remains (not-loaded entries excluded).
+    pub is_clean: bool,
+}
+
+// --- dispatch mirrors ------------------------------------------------------
+
+/// FFI mirror of `IntentFilter`.
+#[derive(uniffi::Record)]
+pub struct FfiIntentFilter {
+    /// `<action android:name>`.
+    pub actions: Vec<String>,
+    /// `<category android:name>`.
+    pub categories: Vec<String>,
+    /// `<data android:scheme>`.
+    pub schemes: Vec<String>,
+}
+
+impl From<FfiIntentFilter> for IntentFilter {
+    fn from(f: FfiIntentFilter) -> Self {
+        IntentFilter {
+            actions: f.actions,
+            categories: f.categories,
+            schemes: f.schemes,
+        }
+    }
+}
+
+impl From<IntentFilter> for FfiIntentFilter {
+    fn from(f: IntentFilter) -> Self {
+        FfiIntentFilter {
+            actions: f.actions,
+            categories: f.categories,
+            schemes: f.schemes,
+        }
+    }
+}
+
+/// FFI mirror of `StaticReceiver`.
+#[derive(uniffi::Record)]
+pub struct FfiStaticReceiver {
+    /// Fully-qualified receiver class name.
+    pub class_name: String,
+    /// Component-level `android:enabled`.
+    pub enabled: bool,
+    /// Component-level `android:exported`.
+    pub exported: bool,
+    /// Declared intent filters.
+    pub intent_filters: Vec<FfiIntentFilter>,
+}
+
+impl From<FfiStaticReceiver> for StaticReceiver {
+    fn from(r: FfiStaticReceiver) -> Self {
+        StaticReceiver {
+            class_name: r.class_name,
+            enabled: r.enabled,
+            exported: r.exported,
+            intent_filters: r.intent_filters.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<StaticReceiver> for FfiStaticReceiver {
+    fn from(r: StaticReceiver) -> Self {
+        FfiStaticReceiver {
+            class_name: r.class_name,
+            enabled: r.enabled,
+            exported: r.exported,
+            intent_filters: r.intent_filters.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// FFI mirror of `ProviderSpec`.
+#[derive(uniffi::Record)]
+pub struct FfiProviderSpec {
+    /// Fully-qualified provider class name.
+    pub class_name: String,
+    /// `android:authorities` split on `;`.
+    pub authorities: Vec<String>,
+    /// Component-level `android:enabled`.
+    pub enabled: bool,
+    /// Component-level `android:exported`.
+    pub exported: bool,
+}
+
+impl From<FfiProviderSpec> for ProviderSpec {
+    fn from(p: FfiProviderSpec) -> Self {
+        ProviderSpec {
+            class_name: p.class_name,
+            authorities: p.authorities,
+            enabled: p.enabled,
+            exported: p.exported,
+        }
+    }
+}
+
+/// FFI mirror of `IntentQuery`.
+#[derive(uniffi::Record)]
+pub struct FfiIntentQuery {
+    /// `Intent.getAction`; a broadcast without an action matches nothing.
+    pub action: Option<String>,
+    /// `Intent.getCategories` (empty = none).
+    pub categories: Vec<String>,
+    /// `Intent.getData()?.getScheme`.
+    pub scheme: Option<String>,
+    /// True when the intent's package equals the host package.
+    pub is_internal: bool,
+}
+
+impl From<FfiIntentQuery> for IntentQuery {
+    fn from(q: FfiIntentQuery) -> Self {
+        IntentQuery {
+            action: q.action,
+            categories: q.categories,
+            scheme: q.scheme,
+            is_internal: q.is_internal,
+        }
+    }
+}
+
+/// One matched receiver with its owning plugin.
+#[derive(uniffi::Record)]
+pub struct FfiReceiverMatch {
+    /// Owning plugin id.
+    pub plugin_id: String,
+    /// The matched receiver.
+    pub receiver: FfiStaticReceiver,
+}
+
+/// One serialized exception in a cause chain (outermost first).
+#[derive(uniffi::Record)]
+pub struct FfiExceptionFrame {
+    /// JVM class name of the exception.
+    pub class_name: String,
+    /// Stack frames as fully-qualified class names (top frame first).
+    pub stack_classes: Vec<String>,
+}
+
+impl From<FfiExceptionFrame> for ExceptionFrame {
+    fn from(f: FfiExceptionFrame) -> Self {
+        ExceptionFrame {
+            class_name: f.class_name,
+            stack_classes: f.stack_classes,
+        }
+    }
+}
+
+/// Framework-declared dependency failure, extracted on the Kotlin side.
+#[derive(uniffi::Record)]
+pub struct FfiDependencyFailure {
+    /// The plugin whose class load failed.
+    pub culprit_plugin_id: String,
+    /// The class that could not be resolved.
+    pub missing_class: String,
+}
+
+impl From<FfiDependencyFailure> for DependencyFailure {
+    fn from(f: FfiDependencyFailure) -> Self {
+        DependencyFailure {
+            culprit_plugin_id: f.culprit_plugin_id,
+            missing_class: f.missing_class,
+        }
+    }
+}
+
+/// Crash category, in evaluation order.
+#[derive(uniffi::Enum)]
+pub enum FfiCrashKind {
+    /// Framework-declared dependency resolution failure.
+    Dependency,
+    /// Class-cast failure (typically a half-updated plugin).
+    ClassCast,
+    /// Missing plugin resource.
+    ResourceNotFound,
+    /// Linkage failure against the host (plugin/host ABI skew).
+    ApiIncompatible,
+    /// Any other exception attributed to a plugin.
+    Other,
+}
+
+/// The dispatcher's decision for one uncaught exception.
+#[derive(uniffi::Record)]
+pub struct FfiCrashVerdict {
+    /// Attributed plugin, when any.
+    pub culprit_plugin_id: Option<String>,
+    /// Crash category.
+    pub kind: FfiCrashKind,
+}
+
+impl From<CrashVerdict> for FfiCrashVerdict {
+    fn from(v: CrashVerdict) -> Self {
+        let kind = match v.kind {
+            plugin_core::CrashKind::Dependency => FfiCrashKind::Dependency,
+            plugin_core::CrashKind::ClassCast => FfiCrashKind::ClassCast,
+            plugin_core::CrashKind::ResourceNotFound => FfiCrashKind::ResourceNotFound,
+            plugin_core::CrashKind::ApiIncompatible => FfiCrashKind::ApiIncompatible,
+            plugin_core::CrashKind::Other => FfiCrashKind::Other,
+        };
+        FfiCrashVerdict {
+            culprit_plugin_id: v.culprit_plugin_id,
+            kind,
+        }
+    }
+}
+
+/// Plugin-core failures crossing the boundary.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum FfiPluginError {
+    /// Operation referenced a plugin that is not registered.
+    #[error("unknown plugin: {plugin_id}")]
+    UnknownPlugin {
+        /// The offending plugin id.
+        plugin_id: String,
+    },
+    /// The registry file is not well-formed.
+    #[error("corrupt ledger: {reason}")]
+    Corrupt {
+        /// Why the file is rejected.
+        reason: String,
+    },
+    /// Persistence backend failure.
+    #[error("store error: {reason}")]
+    Store {
+        /// Backend message.
+        reason: String,
+    },
+}
+
+impl From<CoreError> for FfiPluginError {
+    fn from(e: CoreError) -> Self {
+        match e {
+            CoreError::Ledger(plugin_core::LedgerError::UnknownPlugin(plugin_id)) => {
+                FfiPluginError::UnknownPlugin { plugin_id }
+            }
+            CoreError::Ledger(plugin_core::LedgerError::Corrupt(reason)) => {
+                FfiPluginError::Corrupt { reason }
+            }
+            CoreError::Ledger(plugin_core::LedgerError::Store(e)) => FfiPluginError::Store {
+                reason: e.to_string(),
+            },
+        }
+    }
+}
+
+/// Handle to the plugin framework's decision core. Plan-style: each call
+/// returns a complete verdict/plan/report; the Kotlin side executes file
+/// and ClassLoader operations. Thread-safe; mutex-guarded on the Rust side.
+#[derive(uniffi::Object)]
+pub struct PluginCoreHandle {
+    inner: Mutex<PluginCore>,
+}
+
+impl PluginCoreHandle {
+    fn lock(&self) -> std::sync::MutexGuard<'_, PluginCore> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+#[uniffi::export]
+impl PluginCoreHandle {
+    /// Opens (or initializes) the registry file at `path`, recovering from a
+    /// crash mid-rotation via the atomic-write sidecars. Topology and grant
+    /// cache start empty — both are session-scoped and rebuild from use.
+    #[uniffi::constructor]
+    pub fn open(
+        path: String,
+        strategy: FfiSignatureStrategy,
+        host_signature_digests: Vec<String>,
+    ) -> Result<Arc<Self>, FfiPluginError> {
+        let core = PluginCore::open(path, strategy.into(), host_signature_digests)?;
+        Ok(Arc::new(Self {
+            inner: Mutex::new(core),
+        }))
+    }
+
+    /// An unpersisted core (tests, ephemeral sessions).
+    #[uniffi::constructor]
+    pub fn in_memory(
+        strategy: FfiSignatureStrategy,
+        host_signature_digests: Vec<String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(PluginCore::in_memory(
+                strategy.into(),
+                host_signature_digests,
+            )),
+        })
+    }
+
+    /// Adjudicates an install/update before any file lands.
+    pub fn adjudicate_install(&self, request: FfiInstallRequest) -> FfiVerdict {
+        self.lock().adjudicate_install(&request.into()).into()
+    }
+
+    /// Commits an install/update after the files are placed; registry and
+    /// index land together, persisted before returning.
+    pub fn commit_install(&self, record: FfiPluginRecord) -> Result<(), FfiPluginError> {
+        Ok(self.lock().commit_install(record.into())?)
+    }
+
+    /// Commits an uninstall: registry entry, graph edges, instance
+    /// registrations, and cached grants all leave together. Returns the
+    /// removed record (the Kotlin side needs its install path).
+    pub fn commit_uninstall(&self, plugin_id: String) -> Result<FfiPluginRecord, FfiPluginError> {
+        Ok(self.lock().commit_uninstall(&plugin_id)?.into())
+    }
+
+    /// Enables or disables a plugin (crash-guided disable uses this).
+    pub fn set_enabled(&self, plugin_id: String, enabled: bool) -> Result<(), FfiPluginError> {
+        Ok(self.lock().set_enabled(&plugin_id, enabled)?)
+    }
+
+    /// Locates a class; on an index hit the borrow edge is recorded when
+    /// `borrower` names another plugin, on a miss the host-fallback outcome
+    /// tells the caller to try the host class loader.
+    pub fn locate_class(&self, class: String, borrower: Option<String>) -> FfiLocateOutcome {
+        self.lock().locate_class(&class, borrower.as_deref()).into()
+    }
+
+    /// The deterministic chained-restart plan for updating `plugin_id`.
+    pub fn restart_plan(&self, plugin_id: String) -> FfiRestartPlan {
+        let plan = self.lock().restart_plan(&plugin_id);
+        FfiRestartPlan {
+            plugin_id: plan.plugin_id,
+            reload_order: plan.reload_order,
+            unload_order: plan.unload_order,
+        }
+    }
+
+    /// Everything that depends on `plugin_id`, transitively (root first,
+    /// deterministic order).
+    pub fn dependents_chain(&self, plugin_id: String) -> Vec<String> {
+        self.lock().dependents_chain(&plugin_id)
+    }
+
+    /// Everything `plugin_id` depends on, transitively (root first,
+    /// deterministic order).
+    pub fn dependencies_chain(&self, plugin_id: String) -> Vec<String> {
+        self.lock().dependencies_chain(&plugin_id)
+    }
+
+    /// Three-way reconciliation: registry ↔ index ↔ loaded set.
+    pub fn audit(&self, loaded_plugin_ids: Vec<String>) -> FfiAuditReport {
+        let report = self.lock().audit(&loaded_plugin_ids);
+        FfiAuditReport {
+            is_clean: report.is_clean(),
+            drifts: report.drifts.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// Fixes index drift on sight; returns what was repaired.
+    pub fn repair(&self) -> Result<FfiAuditReport, FfiPluginError> {
+        let report = self.lock().repair()?;
+        Ok(FfiAuditReport {
+            is_clean: report.is_clean(),
+            drifts: report.drifts.into_iter().map(Into::into).collect(),
+        })
+    }
+
+    /// Evaluates an access rule for one sensitive-API call.
+    pub fn check_api_access(
+        &self,
+        rule: FfiAccessRule,
+        hard_fail: bool,
+        caller: FfiCallerIdentity,
+        target_plugin_id: String,
+        permission_key: String,
+    ) -> FfiVerdict {
+        self.lock()
+            .check_api_access(
+                rule.into(),
+                hard_fail,
+                &caller.into(),
+                &target_plugin_id,
+                &permission_key,
+            )
+            .into()
+    }
+
+    /// Records the user's answer to an authorization prompt.
+    pub fn record_grant(&self, plugin_id: String, permission_key: String, granted: bool) {
+        self.lock()
+            .record_grant(&plugin_id, &permission_key, granted);
+    }
+
+    /// One registered plugin record.
+    pub fn plugin_record(&self, plugin_id: String) -> Option<FfiPluginRecord> {
+        self.lock()
+            .ledger()
+            .record(&plugin_id)
+            .cloned()
+            .map(Into::into)
+    }
+
+    /// All registered plugin records, ordered by plugin id.
+    pub fn all_records(&self) -> Vec<FfiPluginRecord> {
+        self.lock()
+            .ledger()
+            .records()
+            .into_iter()
+            .cloned()
+            .map(Into::into)
+            .collect()
+    }
+
+    /// Registers a pooled-service instance (`"className:taskN"`).
+    pub fn register_instance(&self, instance_id: String, plugin_id: String) {
+        self.lock().register_instance(&instance_id, &plugin_id);
+    }
+
+    /// Drops one pooled-service instance registration.
+    pub fn unregister_instance(&self, instance_id: String) {
+        self.lock().unregister_instance(&instance_id);
+    }
+
+    /// Registers a plugin's static receivers at load (component-disabled
+    /// entries are skipped).
+    pub fn register_receivers(&self, plugin_id: String, receivers: Vec<FfiStaticReceiver>) {
+        self.lock()
+            .register_receivers(&plugin_id, receivers.into_iter().map(Into::into).collect());
+    }
+
+    /// Registers a plugin's content providers at load.
+    pub fn register_providers(&self, plugin_id: String, providers: Vec<FfiProviderSpec>) {
+        self.lock()
+            .register_providers(&plugin_id, providers.into_iter().map(Into::into).collect());
+    }
+
+    /// Matches a broadcast against every registered receiver (narrowed
+    /// Android filter semantics, owned here so host and proxy agree).
+    pub fn match_receivers(&self, query: FfiIntentQuery) -> Vec<FfiReceiverMatch> {
+        self.lock()
+            .match_receivers(&query.into())
+            .into_iter()
+            .map(|(plugin_id, receiver)| FfiReceiverMatch {
+                plugin_id,
+                receiver: receiver.into(),
+            })
+            .collect()
+    }
+
+    /// Routes a provider authority to `(owning plugin, provider class)`.
+    pub fn route_authority(&self, authority: String) -> Option<Vec<String>> {
+        self.lock()
+            .route_authority(&authority)
+            .map(|(owner, class)| vec![owner, class])
+    }
+
+    /// Classifies one uncaught exception: cause-chain attribution plus
+    /// category precedence. `None` means the crash is not plugin-attributable
+    /// and should fall through to the default handler.
+    pub fn classify_crash(
+        &self,
+        chain: Vec<FfiExceptionFrame>,
+        dependency_failure: Option<FfiDependencyFailure>,
+    ) -> Option<FfiCrashVerdict> {
+        let chain: Vec<ExceptionFrame> = chain.into_iter().map(Into::into).collect();
+        let failure: Option<DependencyFailure> = dependency_failure.map(Into::into);
+        self.lock()
+            .classify_crash(&chain, failure.as_ref())
+            .map(Into::into)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -652,5 +1427,129 @@ mod tests {
     fn content_addressing_crosses_the_boundary() {
         let addr = content_address(b"abc".to_vec());
         assert!(verify_content(addr, b"abc".to_vec()));
+    }
+
+    #[test]
+    fn plugin_core_plan_cycle_crosses_the_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plugins.json");
+        let core = PluginCoreHandle::open(
+            path.to_string_lossy().into_owned(),
+            FfiSignatureStrategy::UserGrant,
+            vec!["sig".to_string()],
+        )
+        .unwrap();
+
+        // Adjudicate → commit → locate (edge recorded) → restart plan.
+        let verdict = core.adjudicate_install(FfiInstallRequest {
+            plugin_id: "a".into(),
+            version_code: 1,
+            signature_digests: vec!["sig".into()],
+            package_sha256: "pkg".into(),
+            expected_sha256: Some("pkg".into()),
+            force_overwrite: false,
+        });
+        assert!(matches!(verdict, FfiVerdict::Allow));
+
+        let record = |id: &str, classes: Vec<String>| FfiPluginRecord {
+            plugin_id: id.into(),
+            name: id.to_uppercase(),
+            icon_res_id: None,
+            version_code: 1,
+            version_name: "1.0".into(),
+            entry_class: format!("{id}.Entry"),
+            description: String::new(),
+            signature_digests: vec!["sig".into()],
+            package_sha256: "pkg".into(),
+            install_path: format!("/plugins/{id}"),
+            enabled: true,
+            installed_at_ms: 0,
+            classes,
+            static_receivers_json: None,
+            providers_json: None,
+        };
+        core.commit_install(record("a", vec!["a.Foo".into()]))
+            .unwrap();
+        core.commit_install(record("b", vec![])).unwrap();
+
+        match core.locate_class("a.Foo".into(), Some("b".into())) {
+            FfiLocateOutcome::Plugin { plugin_id } => assert_eq!(plugin_id, "a"),
+            FfiLocateOutcome::HostFallback => panic!("expected plugin hit"),
+        }
+        assert!(matches!(
+            core.locate_class("host.Thing".into(), Some("b".into())),
+            FfiLocateOutcome::HostFallback
+        ));
+
+        let plan = core.restart_plan("a".into());
+        assert_eq!(plan.reload_order, vec!["a", "b"]);
+        assert_eq!(plan.unload_order, vec!["b", "a"]);
+        // Chain queries exclude the queried plugin itself.
+        assert_eq!(core.dependents_chain("a".into()), vec!["b"]);
+        assert_eq!(core.dependencies_chain("b".into()), vec!["a"]);
+
+        let report = core.audit(vec!["a".into(), "b".into()]);
+        assert!(report.is_clean);
+
+        // Dispatch: receiver registration, matching, and crash classification.
+        core.register_receivers(
+            "a".into(),
+            vec![FfiStaticReceiver {
+                class_name: "a.R".into(),
+                enabled: true,
+                exported: false,
+                intent_filters: vec![FfiIntentFilter {
+                    actions: vec!["A".into()],
+                    categories: vec![],
+                    schemes: vec![],
+                }],
+            }],
+        );
+        assert!(core
+            .match_receivers(FfiIntentQuery {
+                action: Some("A".into()),
+                categories: vec![],
+                scheme: None,
+                is_internal: false,
+            })
+            .is_empty());
+        assert_eq!(
+            core.match_receivers(FfiIntentQuery {
+                action: Some("A".into()),
+                categories: vec![],
+                scheme: None,
+                is_internal: true,
+            })
+            .len(),
+            1
+        );
+        let verdict = core
+            .classify_crash(
+                vec![FfiExceptionFrame {
+                    class_name: "java.lang.ClassCastException".into(),
+                    stack_classes: vec!["a.Foo".into()],
+                }],
+                None,
+            )
+            .unwrap();
+        assert!(matches!(verdict.kind, FfiCrashKind::ClassCast));
+        assert_eq!(verdict.culprit_plugin_id.as_deref(), Some("a"));
+
+        // Persistence: a fresh handle sees the same registry.
+        let reopened = PluginCoreHandle::open(
+            path.to_string_lossy().into_owned(),
+            FfiSignatureStrategy::UserGrant,
+            vec!["sig".to_string()],
+        )
+        .unwrap();
+        assert_eq!(reopened.all_records().len(), 2);
+
+        // Uninstall cascades and persists.
+        let removed = reopened.commit_uninstall("a".into()).unwrap();
+        assert_eq!(removed.install_path, "/plugins/a");
+        assert!(matches!(
+            reopened.locate_class("a.Foo".into(), Some("b".into())),
+            FfiLocateOutcome::HostFallback
+        ));
     }
 }
