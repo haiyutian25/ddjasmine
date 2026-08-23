@@ -6,4 +6,5 @@
     <string name="chat_error">错误：%1$s</string>
     <string name="chat_settings">设置</string>
     <string name="chat_reasoning_label">思考过程</string>
+    <string name="chat_thinking_label">思考中</string>
 </resources>

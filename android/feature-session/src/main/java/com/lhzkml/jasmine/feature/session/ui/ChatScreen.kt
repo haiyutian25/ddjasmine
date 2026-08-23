@@ -41,7 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.PsychologyAlt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -293,13 +293,20 @@ private fun ChatEntryItem(entry: ChatEntry) {
 }
 
 /**
- * The thinking block. It arrives already finished (the assistant entry is
- * added when the turn completes), so it starts collapsed; tapping the
- * header expands or re-folds the full reasoning text.
+ * The thinking block — collapsed by default, both while streaming (label
+ * "思考中", brain icon pulsing) and once finished (label "思考过程", steady
+ * icon). Tapping the header expands or re-folds the full reasoning text.
  */
 @Composable
-private fun CollapsibleReasoning(reasoning: String) {
+private fun CollapsibleReasoning(reasoning: String, streaming: Boolean = false) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    val pulse = rememberInfiniteTransition(label = "thinking")
+    val iconAlpha by pulse.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(700), repeatMode = RepeatMode.Reverse),
+        label = "brain",
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -309,12 +316,14 @@ private fun CollapsibleReasoning(reasoning: String) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = Icons.Filled.Psychology,
+            imageVector = Icons.Filled.PsychologyAlt,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.tertiary,
+            tint = MaterialTheme.colorScheme.tertiary
+                .copy(alpha = if (streaming) iconAlpha else 1f),
         )
         Text(
-            stringResource(R.string.chat_reasoning_label),
+            if (streaming) stringResource(R.string.chat_thinking_label)
+            else stringResource(R.string.chat_reasoning_label),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.tertiary,
         )
@@ -346,11 +355,7 @@ private fun StreamingAssistantBlock(reasoning: String, text: String) {
     if (reasoning.isEmpty() && text.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
         if (reasoning.isNotEmpty()) {
-            Text(
-                reasoning,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.tertiary,
-            )
+            CollapsibleReasoning(reasoning = reasoning, streaming = true)
         }
         if (text.isNotEmpty()) {
             StreamingMarkdown(text)
