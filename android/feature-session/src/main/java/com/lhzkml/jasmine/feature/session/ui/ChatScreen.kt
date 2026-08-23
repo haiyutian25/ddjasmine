@@ -408,10 +408,10 @@ private fun ThinkingSheetContent(
         TimelineStep(
             label = "思考过程",
             content = reasoning,
-            showStem = false,
+            showStem = true,
         )
         Row(
-            modifier = Modifier.padding(start = 2.dp, top = 10.dp),
+            modifier = Modifier.padding(start = 3.dp, top = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -449,7 +449,7 @@ private fun TimelineStep(label: String, content: String, showStem: Boolean) {
                     val x = 11.dp.toPx()
                     drawLine(
                         color = stemColor,
-                        start = Offset(x, 17.dp.toPx()),
+                        start = Offset(x, 12.dp.toPx()),
                         end = Offset(x, size.height),
                         strokeWidth = 2.dp.toPx(),
                     )
@@ -458,7 +458,7 @@ private fun TimelineStep(label: String, content: String, showStem: Boolean) {
     ) {
         Box(
             modifier = Modifier
-                .padding(start = 7.dp, top = 5.dp)
+                .padding(start = 7.dp, top = 2.dp)
                 .size(8.dp)
                 .background(MaterialTheme.colorScheme.tertiary, CircleShape),
         )
