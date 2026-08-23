@@ -22,6 +22,13 @@ plugins {
     alias(libs.plugins.hilt.gradle)
     alias(libs.plugins.ksp)
     alias(libs.plugins.compose.compiler)
+    id("jasmine.plugin-dev")
+}
+
+// Development/发布态插件分发：sample-plugin 经 pack 管线产出的插件 APK
+// 由 plugin-dev 生成式注入 assets/plugins（构建产物，不落源码树）。
+pluginDev {
+    packModules.set(listOf(":sample-plugin"))
 }
 
 android {
@@ -42,10 +49,22 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            // 占位签名：发布前替换为正式证书；插件同样以 debug 证书打包，
+            // 保证 Strict 策略下宿主信任校验通过。
+            storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -73,6 +92,67 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// ---------------------------------------------------------------------------
+// 插件分发交给 jasmine.plugin-dev（见上方 pluginDev 块）；代理组件由
+// :core-plugin 库 manifest 合并，无需在此注册。
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Rust native library pipeline: cross-compile the UniFFI cdylib for all four
+// Android ABIs and sync into jniLibs before packaging. FFI 面一改，宿主 .so
+// 自动同步，不再手动拷贝。无 Rust 工具链的环境可用 -PskipRustNative=true
+// 跳过（沿用已签入的 .so）。
+// ---------------------------------------------------------------------------
+val rustDir = rootProject.file("../rust")
+val rustAndroidAbis = mapOf(
+    "aarch64-linux-android" to "arm64-v8a",
+    "armv7-linux-androideabi" to "armeabi-v7a",
+    "i686-linux-android" to "x86",
+    "x86_64-linux-android" to "x86_64",
+)
+
+val skipRustNative = providers.gradleProperty("skipRustNative")
+    .map { it.toBoolean() }
+    .getOrElse(false)
+
+val buildRustAndroid by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Cross-compiles the Rust UniFFI cdylib for all Android ABIs"
+    workingDir = rustDir
+    commandLine(
+        listOf("cargo", "build", "--release", "-p", "ffi") +
+            rustAndroidAbis.keys.flatMap { listOf("--target", it) },
+    )
+}
+
+// One Copy task per ABI (a Copy task has a single destination).
+val syncRustJniLibsByAbi = rustAndroidAbis.map { (rustTarget, androidDir) ->
+    tasks.register<Copy>("syncRustJniLibs${androidDir.replace("-", "")}") {
+        group = "build"
+        description = "Copies fresh libffi.so into src/main/jniLibs/$androidDir"
+        dependsOn(buildRustAndroid)
+        from(rustDir.resolve("target/$rustTarget/release/libffi.so"))
+        into(layout.projectDirectory.dir("src/main/jniLibs/$androidDir").asFile)
+    }
+}
+
+val syncRustJniLibs by tasks.registering {
+    group = "build"
+    description = "Syncs the freshly built Rust cdylib into src/main/jniLibs (all ABIs)"
+    dependsOn(syncRustJniLibsByAbi)
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(syncRustJniLibs)
+}
+
+// Skip switch for CI / toolchain-less environments.
+if (skipRustNative) {
+    buildRustAndroid.configure { onlyIf { false } }
+    syncRustJniLibsByAbi.forEach { it.configure { onlyIf { false } } }
+    syncRustJniLibs.configure { onlyIf { false } }
+}
+
 // Migrate from kotlinOptions to compilerOptions
 kotlin {
     compilerOptions {
@@ -81,6 +161,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":core-plugin"))
     implementation(project(":core-ui"))
     implementation(project(":feature-plugin"))
     implementation(project(":feature-plugin-navigation"))
@@ -103,6 +184,8 @@ dependencies {
     // Hilt Dependency Injection
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    // Plugin framework API weave: activates the moment an interface is @GatedApi
+    ksp(project(":core-plugin-ksp"))
     kspAndroidTest(libs.hilt.compiler)
     kspTest(libs.hilt.compiler)
 

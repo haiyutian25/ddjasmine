@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Library manifest: proxy components merge into the host app automatically.
+  ${applicationId} expands to the HOST's package id at merge time, so the
+  provider authority and broadcast package scoping stay host-unique.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Single-proxy activity for all plugin activities -->
+        <activity
+            android:name=".proxy.HostActivity"
+            android:exported="false" />
+
+        <!-- Centralized static-broadcast proxy: shared system action set -->
+        <receiver
+            android:name=".proxy.HostReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+                <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
+                <action android:name="android.intent.action.BATTERY_LOW" />
+                <action android:name="android.intent.action.SCREEN_ON" />
+                <action android:name="android.intent.action.SCREEN_OFF" />
+                <action android:name="android.intent.action.USER_PRESENT" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Centralized content-provider proxy -->
+        <provider
+            android:name=".proxy.HostProvider"
+            android:authorities="${applicationId}.plugin.proxy"
+            android:exported="true" />
+
+        <!-- Pooled proxy services: ten concurrent plugin-service slots -->
+        <service android:name=".proxy.HostService1" android:exported="false" />
+        <service android:name=".proxy.HostService2" android:exported="false" />
+        <service android:name=".proxy.HostService3" android:exported="false" />
+        <service android:name=".proxy.HostService4" android:exported="false" />
+        <service android:name=".proxy.HostService5" android:exported="false" />
+        <service android:name=".proxy.HostService6" android:exported="false" />
+        <service android:name=".proxy.HostService7" android:exported="false" />
+        <service android:name=".proxy.HostService8" android:exported="false" />
+        <service android:name=".proxy.HostService9" android:exported="false" />
+        <service android:name=".proxy.HostService10" android:exported="false" />
+
+        <!-- Default authorization dialog (hosts can replace the handler) -->
+        <activity
+            android:name=".auth.PluginAuthorizationActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+    </application>
+
+</manifest>

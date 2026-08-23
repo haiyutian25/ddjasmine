@@ -15,6 +15,7 @@
  */
 
 pluginManagement {
+    includeBuild("build-logic")
     repositories {
         gradlePluginPortal()
         google()
@@ -43,10 +44,13 @@ include(":core-data")
 include(":core-database")
 include(":core-kernel")
 include(":core-kernel-ksp")
+include(":core-plugin")
+include(":core-plugin-ksp")
 include(":core-testing")
 include(":core-ui")
 include(":feature-plugin-navigation")
 include(":feature-session-navigation")
 include(":feature-session")
 include(":feature-plugin")
+include(":sample-plugin")
 include(":test-app")

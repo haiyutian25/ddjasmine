@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <application
+        android:label="Hello 示例插件">
+        <!-- Runtime contract: entry class + description read at install -->
+        <meta-data
+            android:name="jasmine.plugin.entryClass"
+            android:value="jasmine.sample.hello.HelloEntry" />
+        <meta-data
+            android:name="jasmine.plugin.description"
+            android:value="最小端到端示例：入口 + 界面 + 静态广播 + 后台服务" />
+
+        <!-- Static receiver, dispatched through the host's central proxy -->
+        <receiver
+            android:name=".PingReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="jasmine.sample.hello.PING" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

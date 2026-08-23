@@ -1185,6 +1185,13 @@ impl PluginCoreHandle {
         Ok(self.lock().set_enabled(&plugin_id, enabled)?)
     }
 
+    /// Runtime unload (the plugin stays installed): receiver/provider
+    /// routes, borrow edges, and pooled-service instances leave; the
+    /// registry entry and cached grants stay.
+    pub fn plugin_unloaded(&self, plugin_id: String) {
+        self.lock().plugin_unloaded(&plugin_id);
+    }
+
     /// Locates a class; on an index hit the borrow edge is recorded when
     /// `borrower` names another plugin, on a miss the host-fallback outcome
     /// tells the caller to try the host class loader.

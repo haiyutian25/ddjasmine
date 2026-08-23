@@ -1,8 +1,19 @@
 # 插件化框架 Rust 重写方案 —— 基于 ComboLite 代码级审核
 
 > 状态：方案设计 v3（第三轮：对 ComboLite 源码逐条核对后勘误，缺陷增至 6 个，新增 12 项遗漏补遗）
-> 实施：Rust 侧已落地——`rust/plugin-core`（ledger/topology/charter 三模块）+ `store::atomic_write`
-> + ffi 导出 `PluginCoreHandle` 计划式 API；140 项工作区测试通过，clippy 0 警告，fmt 干净。
+> 实施：Rust 侧已落地——`rust/plugin-core`（ledger/topology/charter/dispatch 四模块）+ `store::atomic_write`
+> + ffi 导出 `PluginCoreHandle` 计划式 API；147 项工作区测试通过，clippy 0 警告，fmt 干净。
+> Kotlin 侧执行壳已落地——`android/core-plugin`（PluginHost 门面 / InstallExecutor / PluginClassLoader /
+> LifecycleExecutor / 四大代理 / CrashHook / 资源双路径加载 / 更新通道 / 默认授权 UI / PluginHostApplication），
+> 绑定走独立包 `com.lhzkml.jasmine.core.plugin.rust`。宿主接线零成本：代理组件在库 manifest 预注册自动合并。
+> 示例插件 `:sample-plugin` 与 app 端到端接线完成（assets 打包 + 首启安装 + 自动加载，KSP 织入已生成
+> `HelloHostApiGated` 验证通过）。构建插件 `:build-logic`（jasmine.plugin-pack：AAR→APK 五步链含
+> `--package-id 0x80+N` 分区；jasmine.plugin-dev：开发期注入宿主）与 KSP 处理器 `:core-plugin-ksp` 已落地。
+> **三处已全部接入 app**：app 应用 `jasmine.plugin-dev`（packModules=:sample-plugin，插件经 pack 管线产出后
+> 生成式注入 assets/plugins）；app 挂 `ksp(project(":core-plugin-ksp"))`；更新通道以占位地址
+> `https://updates.example.com/jasmine` 在启动就绪后触发检查（失败不致命）。
+> `:app:assembleRelease` BUILD SUCCESSFUL，发布包 `app/build/outputs/apk/release/app-release.apk`（占位
+> debug 签名，含 `assets/plugins/sample-plugin.apk`）。
 > 落地后已做第四轮字段级对照（见 2.7），签名语义/记录字段/依赖链查询三处偏差已修正。
 > 依据：《插件化架构开发方案》《插件化架构-插件的ui解决方案》（见 `插件化架构开发方案/`）
 > 参考实现：ComboLite v2.0（本地 `ComboLite/`，Apache-2.0，只读参考，重写不复用其代码）

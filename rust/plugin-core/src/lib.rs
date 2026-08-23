@@ -141,6 +141,15 @@ impl PluginCore {
         Ok(self.ledger.set_enabled(plugin_id, enabled)?)
     }
 
+    /// Runtime unload (the plugin stays installed): receiver/provider
+    /// routes, borrow edges, and pooled-service instances leave — they are
+    /// all session state that rebuilds on the next load. The registry entry
+    /// and cached grants stay.
+    pub fn plugin_unloaded(&mut self, plugin_id: &str) {
+        self.receivers.unregister_plugin(plugin_id);
+        self.topology.remove_plugin(plugin_id);
+    }
+
     /// Locates a class. On an index hit the borrow edge is recorded (when
     /// the borrower is another plugin); on a miss the host-fallback outcome
     /// is returned — the Kotlin side tries the host class loader and only

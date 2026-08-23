@@ -1,0 +1,5 @@
+# UniFFI Kotlin bindings live in this module under their own package so the
+# plugin runtime never collides with the session-spine bindings in
+# :core-data (com.lhzkml.jasmine.rust) when both sit on the same classpath.
+[crates.ffi.bindings.kotlin]
+package_name = "com.lhzkml.jasmine.core.plugin.rust"

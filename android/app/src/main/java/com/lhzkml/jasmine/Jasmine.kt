@@ -1,14 +1,47 @@
 package com.lhzkml.jasmine
 
-import android.app.Application
 import android.util.Log
+import com.lhzkml.jasmine.core.plugin.PluginHost
+import com.lhzkml.jasmine.core.plugin.PluginHostApplication
+import com.lhzkml.jasmine.core.plugin.SignaturePolicy
 import com.lhzkml.jasmine.rust.FfiSessionHeader
 import com.lhzkml.jasmine.rust.SessionLogHandle
 import dagger.hilt.android.HiltAndroidApp
 import java.util.UUID
 
 @HiltAndroidApp
-class Jasmine : Application() {
+class Jasmine : PluginHostApplication() {
+
+    /**
+     * Debug builds sign every module with the same debug key, so the
+     * bundled sample plugin passes the Strict gate as host-trusted.
+     */
+    override fun pluginPolicy(): SignaturePolicy = SignaturePolicy.Strict
+
+    override fun onPluginFrameworkReady(): suspend () -> Unit = {
+        PluginHost.updateManifestBaseUrl = "https://updates.example.com/jasmine"
+        val installed = PluginHost.installBundledPlugins()
+        if (installed.isNotEmpty()) {
+            Log.i(TAG, "bundled plugins installed: $installed")
+        }
+        for (pluginId in PluginHost.allPlugins().map { it.pluginId }) {
+            if (!PluginHost.isLoaded(pluginId)) {
+                runCatching { PluginHost.launchPlugin(pluginId) }
+                    .onFailure { Log.e(TAG, "launch failed: $pluginId", it) }
+            }
+        }
+        Log.i(TAG, "plugin runtime ready: loaded=${PluginHost.loadedPluginIds()}")
+
+        // Network update check against the placeholder manifest host; any
+        // failure is logged, never fatal. Point the base URL at a real
+        // server (updates/<id>.json per plugin) to enable delivery.
+        val updated = runCatching { PluginHost.applyAvailableUpdates() }.getOrDefault(emptyList())
+        if (updated.isNotEmpty()) Log.i(TAG, "插件已热更: $updated")
+    }
+
+    private companion object {
+        const val TAG = "Jasmine"
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -58,7 +91,4 @@ class Jasmine : Application() {
         }
     }
 
-    private companion object {
-        const val TAG = "Jasmine"
-    }
 }
