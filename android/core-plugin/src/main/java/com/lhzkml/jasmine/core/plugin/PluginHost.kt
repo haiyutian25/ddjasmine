@@ -130,6 +130,29 @@ object PluginHost {
         com.lhzkml.jasmine.core.plugin.proxy.ExecBridge(requireApp())
 
     /**
+     * Registers a named host capability invocable from any process by command
+     * name (OpenMinis `native_offload`-style). See
+     * [com.lhzkml.jasmine.core.plugin.process.OffloadDispatcher].
+     */
+    fun registerOffload(name: String, handler: com.lhzkml.jasmine.core.plugin.process.OffloadHandler) =
+        com.lhzkml.jasmine.core.plugin.process.OffloadDispatcher.register(name, handler)
+
+    /** Unregisters a named capability. */
+    fun unregisterOffload(name: String) =
+        com.lhzkml.jasmine.core.plugin.process.OffloadDispatcher.unregister(name)
+
+    /**
+     * Invokes a named capability; local handlers run in-process, unregistered
+     * names route over the abstract socket to the owning (host) process.
+     */
+    fun dispatchOffload(
+        name: String,
+        argv: List<String> = emptyList(),
+        env: Map<String, String> = emptyMap(),
+    ): com.lhzkml.jasmine.core.plugin.process.OffloadResult =
+        com.lhzkml.jasmine.core.plugin.process.OffloadDispatcher.dispatch(name, argv, env)
+
+    /**
      * Moves a plugin into the isolated `:plugin_isolated` process (heavy
      * native / crash containment). See
      * [com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager].
@@ -218,6 +241,15 @@ object PluginHost {
             app = application
             lc.loadEnabled(handle.allRecords().filter(loadFilter))
             refreshMenuEntries(lc)
+            // The host serves the named-capability offload channel; the
+            // isolated process only consumes it (handlers register in the host).
+            if (!com.lhzkml.jasmine.core.plugin.process.ProcessIdentity
+                    .isIsolatedProcess(application)
+            ) {
+                runCatching {
+                    com.lhzkml.jasmine.core.plugin.process.OffloadDispatcher.startServer()
+                }
+            }
             ready.complete(Unit)
         }
     }
