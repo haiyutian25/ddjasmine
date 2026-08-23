@@ -3,6 +3,7 @@ package com.lhzkml.jasmine.core.plugin.proxy
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.content.res.Resources
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -36,6 +37,17 @@ open class HostActivity : ComponentActivity() {
     protected var pluginActivity: PluginActivity? = null
         private set
 
+    /** The plugin's own resources while hosting an activity; null for host UI. */
+    private var pluginResources: Resources? = null
+
+    /**
+     * When hosting a plugin activity, resolve resources against the plugin's
+     * package-id-partitioned table (host keeps 0x7f, plugins take 0x80+N).
+     * This makes `setContentView(R.layout.…)` and `findViewById(R.id.…)`
+     * inside plugin activities work with their own ids.
+     */
+    override fun getResources(): Resources = pluginResources ?: super.getResources()
+
     private fun initPluginActivity() {
         val className = intent?.getStringExtra(ProxyKeys.ACTIVITY_CLASS) ?: return
         try {
@@ -49,9 +61,11 @@ open class HostActivity : ComponentActivity() {
             val instance = PluginHost.instantiateComponent(pluginId, className)
             pluginActivity = (instance as? PluginActivity)
                 ?: throw IllegalStateException("$className 未实现 PluginActivity")
+            pluginResources = PluginHost.resourcesOf(pluginId)
             pluginActivity?.attach(this)
         } catch (e: Throwable) {
             pluginActivity = null
+            pluginResources = null
             PluginHost.loadFailureCallback?.onFailure(className, "activity", e)
             finish()
         }

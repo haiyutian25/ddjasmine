@@ -14,6 +14,7 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.kotlin.dsl.register
 import java.io.File
 import java.io.FileOutputStream
+import javax.tools.ToolProvider
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -178,7 +179,22 @@ abstract class PluginPackagingTask : DefaultTask() {
         }
         exec(link, workDir)
 
-        // 3. d8: classes.jar (+ any libs/*.jar) → classes.dex
+        // 3. compile the aapt2-generated R.java (final package-id ids) so the
+        //    plugin DEX carries R / R$layout / R$id, exactly like an installed
+        //    app. Library-module R classes are non-final and never ship in
+        //    classes.jar, so this is the only source of real ids.
+        val rClassesDir = File(workDir, "rclasses").apply { mkdirs() }
+        val rJavaFiles = genJava.walkTopDown().filter { it.isFile && it.extension == "java" }.toList()
+        if (rJavaFiles.isNotEmpty()) {
+            val javac = ToolProvider.getSystemJavaCompiler()
+            check(javac != null) { "JDK javac 不可用（需在 JDK 下运行，而非 JRE）" }
+            val javacArgs = mutableListOf("-d", rClassesDir.absolutePath)
+            rJavaFiles.forEach { javacArgs += it.absolutePath }
+            val exit = javac.run(null, null, null, *javacArgs.toTypedArray())
+            check(exit == 0) { "编译插件 R.java 失败" }
+        }
+
+        // 4. d8: classes.jar (+ libs/*.jar + R classes) → classes.dex
         val dexDir = File(workDir, "dex").apply { mkdirs() }
         val jars = buildList {
             val classesJar = File(extractDir, "classes.jar")
@@ -186,12 +202,18 @@ abstract class PluginPackagingTask : DefaultTask() {
             File(extractDir, "libs").listFiles()?.filter { it.extension == "jar" }?.let { addAll(it) }
         }
         check(jars.isNotEmpty()) { "AAR 缺少 classes.jar" }
+        val d8Inputs = buildList {
+            jars.forEach { add(it.absolutePath) }
+            rClassesDir.walkTopDown()
+                .filter { it.isFile && it.extension == "class" }
+                .forEach { add(it.absolutePath) }
+        }
         exec(
-            listOf(tool("d8"), "--output", dexDir.absolutePath) + jars.map { it.absolutePath },
+            listOf(tool("d8"), "--output", dexDir.absolutePath) + d8Inputs,
             workDir,
         )
 
-        // 4. zip: unsigned.apk + classes.dex + assets/ + lib/<abi>/
+        // 5. zip: unsigned.apk + classes.dex + assets/ + lib/<abi>/
         val unsignedOut = File(workDir, "packaged.apk")
         unsignedApk.copyTo(unsignedOut, overwrite = true)
         appendToZip(unsignedOut, File(dexDir, "classes.dex"), "classes.dex")
@@ -206,7 +228,7 @@ abstract class PluginPackagingTask : DefaultTask() {
             }
         }
 
-        // 5. sign
+        // 6. sign
         val signedApk = File(outputDir.get().asFile, "plugin-signed.apk")
         exec(
             listOf(

@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service.START_NOT_STICKY
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -67,7 +68,16 @@ class StopwatchService : BasePluginService() {
             sendInternal(ACTION_SERVICE_STARTED, receivedId)
         }
         val notification = createNotification("计时准备中...")
-        proxy?.startForeground(notificationId, notification)
+        val service = proxy ?: return START_NOT_STICKY
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            service.startForeground(
+                notificationId,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+            )
+        } else {
+            service.startForeground(notificationId, notification)
+        }
         return START_NOT_STICKY
     }
 

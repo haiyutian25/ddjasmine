@@ -36,17 +36,60 @@
             android:authorities="${applicationId}.plugin.proxy"
             android:exported="true" />
 
-        <!-- Pooled proxy services: ten concurrent plugin-service slots -->
-        <service android:name=".proxy.HostService1" android:exported="false" />
-        <service android:name=".proxy.HostService2" android:exported="false" />
-        <service android:name=".proxy.HostService3" android:exported="false" />
-        <service android:name=".proxy.HostService4" android:exported="false" />
-        <service android:name=".proxy.HostService5" android:exported="false" />
-        <service android:name=".proxy.HostService6" android:exported="false" />
-        <service android:name=".proxy.HostService7" android:exported="false" />
-        <service android:name=".proxy.HostService8" android:exported="false" />
-        <service android:name=".proxy.HostService9" android:exported="false" />
-        <service android:name=".proxy.HostService10" android:exported="false" />
+        <!-- Pooled proxy services: ten concurrent plugin-service slots.
+             foregroundServiceType=specialUse lets plugin services call
+             startForeground on Android 14+; the required subtype property
+             documents the purpose. -->
+        <service android:name=".proxy.HostService1" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService2" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService3" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService4" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService5" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService6" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService7" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService8" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService9" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService10" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
 
         <!-- Default authorization dialog (hosts can replace the handler) -->
         <activity
