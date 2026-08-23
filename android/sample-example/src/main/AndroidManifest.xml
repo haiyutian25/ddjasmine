@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:versionCode="1"
+    android:versionName="1.0.0">
+
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application android:label="功能示例">
+        <meta-data
+            android:name="jasmine.plugin.entryClass"
+            android:value="jasmine.sample.example.ExampleEntry" />
+        <meta-data
+            android:name="jasmine.plugin.description"
+            android:value="Jasmine 插件化框架功能示例：Activity/Service/广播/ContentProvider/native so/热更新。" />
+
+        <!-- 静态广播：经宿主中心化代理分发 -->
+        <receiver
+            android:name=".receiver.StaticReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="jasmine.sample.example.action.STATIC_BROADCAST" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ContentProvider：经宿主 URI 代理路由 -->
+        <provider
+            android:name=".provider.BookProvider"
+            android:authorities="jasmine.sample.example.bookprovider"
+            android:enabled="true"
+            android:exported="false" />
+    </application>
+
+</manifest>

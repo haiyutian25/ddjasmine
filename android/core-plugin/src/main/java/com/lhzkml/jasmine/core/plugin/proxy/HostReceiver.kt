@@ -11,9 +11,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Centralized static-broadcast proxy. Registered once in the host manifest
- * with the shared action set; dispatch matching itself happens in the Rust
- * core so the proxy and the host can never disagree about who sees what.
+ * 中心化静态广播代理。manifest 预声明系统 action 集；分发匹配在 Rust 核心，
+ * 宿主与代理不会对「谁能看到哪个广播」产生分歧。插件自定义 action 由
+ * [StaticReceiverDispatcher] 在运行期动态注册后进入同一分发链路。
  */
 open class HostReceiver : BroadcastReceiver() {
 
@@ -24,31 +24,34 @@ open class HostReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         scope.launch {
             try {
-                if (!PluginHost.isInitialized) return@launch
-                val matches = PluginHost.coreHandle.matchReceivers(
-                    FfiIntentQuery(
-                        action = intent.action,
-                        categories = intent.categories?.toList() ?: emptyList(),
-                        scheme = intent.data?.scheme,
-                        isInternal = intent.`package` == context.packageName,
-                    ),
-                )
-                for (match in matches) {
-                    try {
-                        val receiver = PluginHost.instantiateComponent(
-                            match.pluginId,
-                            match.receiver.className,
-                        ) as? PluginReceiver ?: continue
-                        receiver.onReceive(context, intent)
-                    } catch (e: Throwable) {
-                        PluginHost.loadFailureCallback?.onFailure(
-                            match.pluginId, "receiver", e,
-                        )
-                    }
-                }
+                dispatchPluginReceivers(context, intent)
             } finally {
                 pendingResult.finish()
             }
+        }
+    }
+}
+
+/** 把一条广播分发给所有匹配的插件静态接收器（Rust 匹配 + 实例化 + 回调）。 */
+suspend fun dispatchPluginReceivers(context: Context, intent: Intent) {
+    if (!PluginHost.isInitialized) return
+    val matches = PluginHost.coreHandle.matchReceivers(
+        FfiIntentQuery(
+            action = intent.action,
+            categories = intent.categories?.toList() ?: emptyList(),
+            scheme = intent.data?.scheme,
+            isInternal = intent.`package` == context.packageName,
+        ),
+    )
+    for (match in matches) {
+        try {
+            val receiver = PluginHost.instantiateComponent(
+                match.pluginId,
+                match.receiver.className,
+            ) as? PluginReceiver ?: continue
+            receiver.onReceive(context, intent)
+        } catch (e: Throwable) {
+            PluginHost.loadFailureCallback?.onFailure(match.pluginId, "receiver", e)
         }
     }
 }

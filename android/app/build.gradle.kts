@@ -28,7 +28,7 @@ plugins {
 // Development/发布态插件分发：sample-plugin 经 pack 管线产出的插件 APK
 // 由 plugin-dev 生成式注入 assets/plugins（构建产物，不落源码树）。
 pluginDev {
-    packModules.set(listOf(":sample-plugin"))
+    packModules.set(listOf(":sample-plugin", ":sample-guide", ":sample-example"))
 }
 
 android {

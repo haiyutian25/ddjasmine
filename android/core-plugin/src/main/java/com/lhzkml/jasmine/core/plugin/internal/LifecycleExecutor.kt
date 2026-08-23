@@ -5,6 +5,7 @@ import android.os.Build
 import com.lhzkml.jasmine.core.plugin.PluginContext
 import com.lhzkml.jasmine.core.plugin.PluginEntry
 import com.lhzkml.jasmine.core.plugin.ServiceKey
+import com.lhzkml.jasmine.core.plugin.proxy.StaticReceiverDispatcher
 import com.lhzkml.jasmine.core.plugin.rust.FfiPluginRecord
 import com.lhzkml.jasmine.core.plugin.rust.PluginCoreHandle
 import java.io.File
@@ -37,6 +38,7 @@ internal class LifecycleExecutor(
 ) {
     private val loaded = ConcurrentHashMap<String, LoadedPlugin>()
     private val serviceTables = ConcurrentHashMap<String, Map<ServiceKey<*>, Any>>()
+    private val staticActions = ConcurrentHashMap<String, Set<String>>()
 
     /** Invoked whenever the loaded set changes (load/unload), so the host
      *  can recompute reactive views like the dynamic menu entries. */
@@ -89,7 +91,7 @@ internal class LifecycleExecutor(
             )
             loaded[pluginId] = LoadedPlugin(record, classLoader, entry, resources)
             serviceTables[pluginId] = entry.services
-            registerComponents(record)
+            staticActions[pluginId] = registerComponents(record)
             onChange?.invoke()
         } catch (e: Throwable) {
             loaded.remove(pluginId)
@@ -104,6 +106,7 @@ internal class LifecycleExecutor(
     fun unload(pluginId: String) {
         val plugin = loaded.remove(pluginId) ?: return
         serviceTables.remove(pluginId)
+        staticActions.remove(pluginId)?.let { StaticReceiverDispatcher.unregisterActions(application, it) }
         try {
             plugin.entry.onUnload()
         } catch (e: Throwable) {
@@ -151,7 +154,7 @@ internal class LifecycleExecutor(
             )
     }
 
-    private fun registerComponents(record: FfiPluginRecord) {
+    private fun registerComponents(record: FfiPluginRecord): Set<String> {
         val receivers = record.staticReceiversJson.receiversFromJson()
         if (receivers.isNotEmpty()) {
             core.registerReceivers(record.pluginId, receivers.map { it.toFfi() })
@@ -160,6 +163,11 @@ internal class LifecycleExecutor(
         if (providers.isNotEmpty()) {
             core.registerProviders(record.pluginId, providers.map { it.toFfi() })
         }
+        val actions = receivers.flatMap { r -> r.intentFilters.flatMap { it.actions } }.toSet()
+        if (actions.isNotEmpty()) {
+            StaticReceiverDispatcher.registerActions(application, actions)
+        }
+        return actions
     }
 
     /**

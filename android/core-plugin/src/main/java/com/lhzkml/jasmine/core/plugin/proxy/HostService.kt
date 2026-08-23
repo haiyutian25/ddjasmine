@@ -56,6 +56,9 @@ object ServiceProxyPool {
     fun runningInstancesOf(serviceClassName: String): List<String> =
         active.keys.filter { it.startsWith("$serviceClassName:") }.sorted()
 
+    /** The proxy class behind an exact instance id, or null when not running. */
+    fun proxyClassOf(instanceId: String): Class<out HostService>? = active[instanceId]
+
     private fun ownerPluginOf(serviceClassName: String): String =
         when (val outcome = PluginHost.coreHandle.locateClass(serviceClassName, null)) {
             is FfiLocateOutcome.Plugin -> outcome.pluginId

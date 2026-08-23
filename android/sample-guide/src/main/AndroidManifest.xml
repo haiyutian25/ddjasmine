@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:versionCode="1"
+    android:versionName="1.0.0">
+
+    <application android:label="开发指南">
+        <meta-data
+            android:name="jasmine.plugin.entryClass"
+            android:value="jasmine.sample.guide.GuideEntry" />
+        <meta-data
+            android:name="jasmine.plugin.description"
+            android:value="Jasmine 插件化框架使用向导，提供框架基础介绍与快速开始。" />
+    </application>
+
+</manifest>
