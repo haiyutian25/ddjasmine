@@ -1,107 +1,260 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:orientation="vertical"
+        android:padding="16dp">
 
-        <ImageButton
-            android:id="@+id/ivBack"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:contentDescription="返回"
-            android:src="@android:drawable/ic_menu_revert" />
+        <!-- 标题栏 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
+            <ImageButton
+                android:id="@+id/ivBack"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="返回"
+                android:src="@android:drawable/ic_menu_revert" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="XML UI 布局示例"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:layout_marginStart="12dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvFeedback"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="这是一个 XML 布局页面，包含各种控件"
+            android:textSize="14sp"
+            android:padding="12dp"
+            android:layout_marginTop="8dp" />
+
+        <!-- 文本输入 -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="XML UI 布局示例"
-            android:textSize="20sp"
+            android:text="EditText 文本输入"
+            android:textSize="13sp"
             android:textStyle="bold"
-            android:layout_marginStart="12dp" />
+            android:layout_marginTop="12dp" />
+        <EditText
+            android:id="@+id/editText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="请输入内容"
+            android:layout_marginTop="4dp" />
+
+        <!-- 按钮 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Button 按钮"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <Button
+            android:id="@+id/buttonShowToast"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="显示 Toast"
+            android:layout_marginTop="4dp" />
+
+        <!-- 下拉选择 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Spinner 下拉选择"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <Spinner
+            android:id="@+id/spinnerOptions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <!-- 切换按钮 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ToggleButton 切换按钮"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <ToggleButton
+            android:id="@+id/toggleButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textOn="已开启"
+            android:textOff="已关闭"
+            android:checked="true"
+            android:layout_marginTop="4dp" />
+
+        <!-- 开关 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Switch 开关"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <Switch
+            android:id="@+id/controlSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="启用输入框"
+            android:checked="true"
+            android:layout_marginTop="4dp" />
+
+        <!-- 复选框 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="CheckBox 复选框"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <CheckBox
+            android:id="@+id/checkbox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="复选框"
+            android:layout_marginTop="4dp" />
+
+        <!-- 单选组 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="RadioGroup 单选组"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <RadioGroup
+            android:id="@+id/radioGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp">
+
+            <RadioButton
+                android:id="@+id/radioButton1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="选项A"
+                android:checked="true" />
+
+            <RadioButton
+                android:id="@+id/radioButton2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="选项B" />
+        </RadioGroup>
+
+        <!-- 拖动条 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="SeekBar 拖动条"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <SeekBar
+            android:id="@+id/seekBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:progress="50"
+            android:layout_marginTop="4dp" />
+
+        <!-- 进度条 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ProgressBar 进度条"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:progress="50"
+            android:layout_marginTop="4dp" />
+
+        <!-- 评分条 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="RatingBar 评分条"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <RatingBar
+            android:id="@+id/ratingBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:numStars="5"
+            android:rating="3"
+            android:layout_marginTop="4dp" />
+
+        <!-- 数字选择器 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="NumberPicker 数字选择器"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <NumberPicker
+            android:id="@+id/numberPicker"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="4dp" />
+
+        <!-- 图片 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ImageView 图片（点击图片试试）"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp" />
+        <ImageView
+            android:id="@+id/imageView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:src="@android:drawable/ic_menu_gallery"
+            android:contentDescription="示例图片"
+            android:layout_marginTop="4dp" />
+
+        <!-- 分隔线 -->
+        <View
+            android:id="@+id/dividerLine"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#33000000"
+            android:layout_marginTop="16dp" />
+
+        <!-- 底部留白 -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="24dp" />
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/tvFeedback"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="这是一个 XML 布局页面"
-        android:textSize="14sp"
-        android:padding="12dp"
-        android:layout_marginTop="8dp" />
-
-    <EditText
-        android:id="@+id/editText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="请输入内容"
-        android:layout_marginTop="8dp" />
-
-    <Button
-        android:id="@+id/buttonShowToast"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="显示 Toast"
-        android:layout_marginTop="8dp" />
-
-    <Switch
-        android:id="@+id/controlSwitch"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="启用输入框"
-        android:checked="true" />
-
-    <CheckBox
-        android:id="@+id/checkbox"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="复选框" />
-
-    <RadioGroup
-        android:id="@+id/radioGroup"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
-
-        <RadioButton
-            android:id="@+id/radioButton1"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="选项A"
-            android:checked="true" />
-
-        <RadioButton
-            android:id="@+id/radioButton2"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="选项B" />
-    </RadioGroup>
-
-    <SeekBar
-        android:id="@+id/seekBar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:max="100"
-        android:progress="50" />
-
-    <ProgressBar
-        android:id="@+id/progressBar"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:max="100"
-        android:progress="50" />
-
-    <RatingBar
-        android:id="@+id/ratingBar"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:numStars="5"
-        android:rating="3" />
-</LinearLayout>
+</ScrollView>

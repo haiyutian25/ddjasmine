@@ -100,6 +100,10 @@ class PluginDevPlugin : Plugin<Project> {
                         project.layout.buildDirectory.dir("generated/pluginAssets/${variant.name}"),
                     )
                     apkSources.set(specs)
+                    // 把源 APK 文件声明为输入文件：仅用字符串 @Input 无法感知
+                    // 插件 APK 内容变化，会导致注入任务被误判为 UP-TO-DATE，
+                    // 宿主打包出的还是旧插件。
+                    inputs.files(specs.map { File(it.split("=", limit = 3)[2]) })
                     for (modulePath in modules) {
                         dependsOn("$modulePath:assemble$capitalized")
                     }

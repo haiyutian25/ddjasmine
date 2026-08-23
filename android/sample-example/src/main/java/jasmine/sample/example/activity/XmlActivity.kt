@@ -1,18 +1,25 @@
 package jasmine.sample.example.activity
 
 import android.os.Bundle
+import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.NumberPicker
 import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.RatingBar
 import android.widget.SeekBar
+import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.ToggleButton
 import com.lhzkml.jasmine.core.plugin.component.BasePluginActivity
 
 /** 使用传统 XML 布局的插件 Activity（findViewById，无 ViewBinding）。 */
@@ -28,6 +35,10 @@ class XmlActivity : BasePluginActivity() {
     private lateinit var seekBar: SeekBar
     private lateinit var progressBar: ProgressBar
     private lateinit var ratingBar: RatingBar
+    private lateinit var spinner: Spinner
+    private lateinit var toggleButton: ToggleButton
+    private lateinit var numberPicker: NumberPicker
+    private lateinit var imageView: ImageView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +53,10 @@ class XmlActivity : BasePluginActivity() {
         seekBar = proxy!!.findViewById(jasmine.sample.example.R.id.seekBar)
         progressBar = proxy!!.findViewById(jasmine.sample.example.R.id.progressBar)
         ratingBar = proxy!!.findViewById(jasmine.sample.example.R.id.ratingBar)
+        spinner = proxy!!.findViewById(jasmine.sample.example.R.id.spinnerOptions)
+        toggleButton = proxy!!.findViewById(jasmine.sample.example.R.id.toggleButton)
+        numberPicker = proxy!!.findViewById(jasmine.sample.example.R.id.numberPicker)
+        imageView = proxy!!.findViewById(jasmine.sample.example.R.id.imageView)
 
         ivBack.setOnClickListener { proxy?.finish() }
         val button: Button = proxy!!.findViewById(jasmine.sample.example.R.id.buttonShowToast)
@@ -76,6 +91,39 @@ class XmlActivity : BasePluginActivity() {
         })
         ratingBar.setOnRatingBarChangeListener { _, rating, fromUser ->
             if (fromUser) updateFeedbackText("评分条: 选择了 $rating 星")
+        }
+
+        // Spinner 下拉选择
+        val options = arrayOf("选项一", "选项二", "选项三", "选项四")
+        spinner.adapter = ArrayAdapter(
+            proxy!!,
+            android.R.layout.simple_spinner_dropdown_item,
+            options,
+        )
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateFeedbackText("Spinner: 选择了 ${options[position]}")
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        // ToggleButton 切换按钮
+        toggleButton.setOnCheckedChangeListener { _, isChecked ->
+            updateFeedbackText("ToggleButton: ${if (isChecked) "已开启" else "已关闭"}")
+        }
+
+        // NumberPicker 数字选择器
+        numberPicker.minValue = 0
+        numberPicker.maxValue = 100
+        numberPicker.value = 50
+        numberPicker.setOnValueChangedListener { _, _, newVal ->
+            updateFeedbackText("NumberPicker: 选择了 $newVal", false)
+        }
+
+        // ImageView 图片点击
+        imageView.setOnClickListener {
+            showToast("点击了图片")
+            updateFeedbackText("ImageView: 图片被点击")
         }
     }
 
