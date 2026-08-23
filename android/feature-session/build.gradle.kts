@@ -80,10 +80,13 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     // Markdown rendering for model replies (GFM tables/task lists/code,
-    // streaming-aware state for live output).
+    // streaming-aware state for live output). collections-immutable is the
+    // renderer's runtime need — declared explicitly because the mirror's
+    // incomplete artifacts silently dropped it from the APK before.
     implementation(libs.markdown.renderer)
     implementation(libs.markdown.renderer.m3)
     implementation(libs.markdown.renderer.code)
+    implementation(libs.kotlinx.collections.immutable)
 
     // Navigation
     implementation(libs.androidx.navigation3.runtime)
