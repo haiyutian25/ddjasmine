@@ -69,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lhzkml.jasmine.core.ui.InkBlack
 import com.lhzkml.jasmine.feature.session.R
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.model.rememberMarkdownState
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -358,15 +359,16 @@ private fun StreamingAssistantBlock(reasoning: String, text: String) {
 }
 
 /**
- * Renders the growing reply as Markdown. 0.41.0 has no dedicated streaming
- * state yet, so each delta re-parses the document — the parser runs async
- * off the main thread, which keeps the stream smooth for chat-sized
- * replies. (The renderer's native streaming state needs compileSdk 37 /
- * v0.42+, revisit when the project upgrades.)
+ * Renders the growing reply as Markdown in real time. `retainState` keeps
+ * the previous successful render while the next parse runs, so the row's
+ * height never collapses to the loading state mid-stream — that collapse
+ * used to reset the list anchoring and trip the follow-pause detection.
+ * The parser runs async and conflates rapid deltas.
  */
 @Composable
 private fun StreamingMarkdown(text: String) {
-    Markdown(content = text)
+    val mdState = rememberMarkdownState(content = text, retainState = true)
+    Markdown(markdownState = mdState)
 }
 
 @Composable
