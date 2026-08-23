@@ -24,6 +24,13 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // The markdown renderer's android AARs lag behind on the mirror
+        // (metadata lists the version, files 404), so this group resolves
+        // straight from Maven Central.
+        maven("https://repo1.maven.org/maven2") {
+            name = "MavenCentralOfficial"
+            content { includeGroup("com.mikepenz") }
+        }
         google()
         mavenCentral()
     }
