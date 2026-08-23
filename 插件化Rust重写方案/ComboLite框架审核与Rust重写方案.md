@@ -1,9 +1,9 @@
 # 插件化框架 Rust 重写方案 —— 基于 ComboLite 代码级审核
 
-> 状态：方案设计（未开始开发）
+> 状态：方案设计 v2（第二轮全面复核后修订，未开始开发）
 > 依据：《插件化架构开发方案》《插件化架构-插件的ui解决方案》（见 `插件化架构开发方案/`）
 > 参考实现：ComboLite v2.0（本地 `ComboLite/`，Apache-2.0，只读参考，重写不复用其代码）
-> 审核范围：comboLite-core 全部 51 个 Kotlin 文件中的核心路径约 2500 行逐行审读
+> 审核范围：comboLite-core 全部 51 个 Kotlin 文件的核心路径 + build-logic + sample-plugin 插件侧写法，两轮审读
 
 ---
 
@@ -68,10 +68,23 @@ PluginManager（对外唯一门面/单例，suspend API）
 | 1 | 卸载插件时索引移除是 O(n) 全表扫描 | PluginLifecycleManager:333-343 | Rust 双向索引（pluginId→类集合）O(1) 移除 |
 | 2 | 依赖图 Set 迭代序不确定 → 链式重启计划顺序每次运行可能不同 | DependencyManager:42-50 | 有序集合 + 拓扑排序，计划确定性可复现 |
 | 3 | 类索引漂移只 log 不对账（索引指向未加载插件 / 目标 DEX 缺类两处） | DependencyManager:74-80, 89-94 | invariant 式三方对账（索引↔注册表↔已加载集）+ 修复报告 |
-| 4 | 安装更新的备份失败仅 warn 后继续（旧目录已删，新装再失败=插件丢失） | InstallerManager:186-190 | 真事务：新目录成功后原子切换，失败自动回滚备份 |
+| 4 | 安装更新虽有 catch 回滚（删新目录→`backupDir.renameTo` 恢复），但**备份失败仅 warn 后继续安装**，且回滚恢复失败时插件丢失仅 log | InstallerManager:186-190, 236-249 | 真事务：新目录成功后原子切换，任何一步失败自动回滚并上报 ledger（含恢复失败的双错报告） |
 | 5 | checkApiCaller 用 `com.combo.core.` 字符串前缀跳框架帧，插件可冒名 | PermissionExt:52 | 框架类白名单清单匹配 |
 
 另记录两个取舍：`onLoad` 异常被吞（初始化崩了仍算加载成功）；写盘 renameTo 前无 fsync（断电丢最后 500ms 延迟写）。
+
+### 2.5 补充审核发现（第二轮查漏）
+
+1. **卸载是事务性的**（InstallerManager.uninstallPlugin）：先重命名插件目录 → 删除成功 → 再更新注册表，注释明确以原子性为目标。我们的 ledger 卸载事务可直接对标此设计并加 fsync。
+2. **资源合并的挂载点在 Application 层**（BaseHostApplication 覆写 `getResources()`/`getAssets()`，未初始化时回退 super）——插件资源"全局可见"靠这一层覆写。**本方案取舍**：不覆写 Application 做全局合并（侵入宿主且资源冲突面大），改为**显式注入**（宿主把插件 Resources 经 PluginContext 交给插件），与我们的 Kernel 注入模型一致。
+3. **接口查找有宿主回退**（PluginManager.getInterface:227-231）：类索引未命中时先尝试从宿主自身加载——跨插件服务定位的完整顺序是"索引 → 宿主回退"。topology.locate 需保留该语义。
+4. **崩溃钩子必须最先初始化**（BaseHostApplication.onCreate 中 `PluginCrashHandler.initialize` 先于 `PluginManager.initialize`）——时序约束写入执行器设计。
+5. **跨插件 UI 协作模式**（sample-plugin/home 的 Content()）：共享接口定义在 common 插件（compileOnly）→ Koin `inject()` 取实现 → `CompositionLocalProvider` 注入 Compose 语境。我们等价替换：接口由插件 SDK 定义 + ServiceKey 提供 + CompositionLocal 传递。这是 POC 必须验证的第二条链路（不止"插件出 UI"，还有"插件间 UI 协作"）。
+6. **aar2apk 实为两个 Gradle 插件**：`Aar2ApkPlugin`（AarExtractor → ApkPackager → ApkSigner 发布链）与 `AppIntegrationPlugin`（开发期把插件注入宿主构建）。我们照此拆分：`jasmine-plugin-pack` 与 `jasmine-plugin-dev` 两个构建插件。
+7. **DEX 扫描带 API 级别语义**：`DexFileFactory.loadDexContainer(apk, Opcodes.forApi(SDK_INT))`——按运行 API 选 opcode 集，扫描器实现需保留此参数。
+8. **Service 代理池细节**：实例标识符 `类名:taskN`（前缀匹配恢复运行态）；池耗尽返回 null 无排队。代理池大小的容量规划写入宿主 Manifest 预注册清单。
+9. **checkApiCaller 是手写样板侵入**：每个敏感 API 方法体首行都要写 `::method.javaMethod?.checkApiCaller()`——易漏。我们的改进：KSP 编译期自动织入检查（我们已有 KSP 插件索引先例）或统一网关入口。
+10. **框架内嵌 Koin**（PluginManager.initialize 里 `startKoin`）：宿主若已有 Koin 会冲突。我们无此依赖（ServiceKey 自研），规避。
 
 ---
 
@@ -94,13 +107,21 @@ Rust 侧（新 crate，与 store/session-log/measure 平级；首版单 crate �
 
 Kotlin 侧（现有结构上扩展，命名全新）
   core-kernel（现有 Kernel 之上）
-    ├─ DEX 扫描器（dexlib2）：产出类清单 → 交 ledger 建索引
-    ├─ PluginClassLoader 移植版：parent 委派 + topology 委托仲裁（走 Rust 查询）
+    ├─ DEX 扫描器（dexlib2，loadDexContainer 带 Opcodes.forApi）：产出类清单 → 交 ledger 建索引
+    ├─ PluginClassLoader 移植版：parent 委派 + topology 委托仲裁（走 Rust 查询，含宿主回退语义）
     ├─ 生命周期执行器：拿 topology 的重启计划，在现有 Fiber/dispose 机制上按序执行
+    │    （崩溃钩子最先初始化，先于框架本体）
     ├─ 安装执行器：按 charter 裁决 + ledger 事务执行文件操作，回滚走 ledger 计划
-    └─ 授权 UI（JasmineBottomSheet 呈现 charter 裁决：允许/需用户授权/拒绝）
+    ├─ 授权 UI（JasmineBottomSheet 呈现 charter 裁决：允许/需用户授权/拒绝）
+    └─ 敏感 API 检查：KSP 编译期自动织入（替代 ComboLite 每方法手写 checkApiCaller 的样板）
+  资源模型：不覆写 Application 做全局合并，插件 Resources 经 PluginContext 显式注入
+  UI 协作：插件 SDK 定义共享接口 + ServiceKey 提供 + CompositionLocal 传递（替代 Koin）
   事件打通：插件装卸事件进现有 EventBus → session-log
     → 现有 invariant 系统顺势获得"插件生命周期序列校验"能力
+
+构建期（build-logic，对照 aar2apk 拆两个 Gradle 插件）
+  ├─ jasmine-plugin-pack：AAR → APK 升格打包 + 签名（发布链）
+  └─ jasmine-plugin-dev：开发期把插件模块注入宿主构建（源码级断点调试）
 ```
 
 ### 4.3 关键交互（计划式）
@@ -128,14 +149,17 @@ Kotlin 侧（现有结构上扩展，命名全新）
 | 版本禁降级判定 | charter | Rust |
 | PluginClassLoader / 生命周期执行 / Koin装卸 | core-kernel 执行器 + ServiceKey | Kotlin |
 | dexlib2 扫描 / PackageManager 签名 / 堆栈追踪 | core-kernel 适配层 | Kotlin |
-| 资源合并 / 四大组件代理 | core-kernel 代理层（首版可裁剪） | Kotlin |
+| 资源合并（Application 覆写式） | 改为 PluginContext 显式注入 | Kotlin（改设计） |
+| 四大组件代理 | core-kernel 代理层（首版可裁剪） | Kotlin |
 | 授权/崩溃 UI | core-ui + JasmineBottomSheet | Kotlin |
+| aar2apk（Aar2Apk + AppIntegration 两插件） | jasmine-plugin-pack + jasmine-plugin-dev | Kotlin（Gradle） |
+| 每方法手写 checkApiCaller | KSP 编译期自动织入 | Kotlin（改进） |
 
 ---
 
 ## 六、实施阶段
 
-1. **POC（先决验证）**：独立模块编译一个实现插件接口 + `@Composable Content()` 的样例插件（全部 compileOnly）→ 宿主验签 → 只读落盘 → DexClassLoader（parent 委派）→ 注册进现有 Kernel → 设置页渲染插件 UI。真机跑通即宣告 Compose 动态插件链路成立。
+1. **POC（先决验证）**：独立模块编译一个实现插件接口 + `@Composable Content()` 的样例插件（全部 compileOnly）→ 宿主验签 → 只读落盘 → DexClassLoader（parent 委派）→ 注册进现有 Kernel → 设置页渲染插件 UI。**同时验证第二条链路**：跨插件 UI 协作（共享接口 + ServiceKey + CompositionLocal，对照 2.5-5 的模式）。真机跑通即宣告 Compose 动态插件链路成立。
 2. **最小闭环**：charter（安装裁决+签名白名单）+ ledger（注册表事务+类索引）+ 执行器，支持 assets 内置插件的安装/加载/卸载。
 3. **拓扑与热更新**：topology 建边/闭包/重启计划 + 对账审计；网络更新通道。
 4. **生态迁移**：内置能力（Model Provider、AgentLoop、MCP/Skill）逐步改造为动态插件，验证"Everything is a Plugin"替换性。
