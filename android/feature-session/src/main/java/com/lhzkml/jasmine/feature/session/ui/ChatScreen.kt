@@ -40,18 +40,21 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowDropUp
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -295,50 +299,71 @@ private fun ChatEntryItem(entry: ChatEntry) {
 }
 
 /**
- * The thinking block — collapsed by default, both while streaming (label
- * "思考中" pulsing, drop-down triangle after it) and once finished (label
- * "思考过程", steady). Tapping the header expands or re-folds the full
- * reasoning text; the triangle flips up when expanded.
+ * The thinking block in the Qwen style: a light rounded pill — bulb icon,
+ * "思考中" (pulsing) or "已完成思考" (steady) label, and a chevron ">" that
+ * rotates down when expanded. Tapping grows the reasoning text out of the
+ * header's bottom edge (expandVertically).
  */
 @Composable
 private fun CollapsibleReasoning(reasoning: String, streaming: Boolean = false) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val pulse = rememberInfiniteTransition(label = "thinking")
-    val textAlpha by pulse.animateFloat(
+    val bulbAlpha by pulse.animateFloat(
         initialValue = 0.35f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(animation = tween(700), repeatMode = RepeatMode.Reverse),
-        label = "label",
+        label = "bulb",
     )
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { expanded = !expanded }
             .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            if (streaming) stringResource(R.string.chat_thinking_label)
-            else stringResource(R.string.chat_reasoning_label),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.tertiary
-                .copy(alpha = if (streaming) textAlpha else 1f),
-        )
-        Icon(
-            imageVector = if (expanded) Icons.Filled.ArrowDropUp else Icons.Filled.ArrowDropDown,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.tertiary,
-            modifier = Modifier.size(20.dp),
-        )
-    }
-    if (expanded) {
-        Text(
-            reasoning,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.tertiary,
-            modifier = Modifier.padding(top = 2.dp),
-        )
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            modifier = Modifier.clickable { expanded = !expanded },
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Lightbulb,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary
+                        .copy(alpha = if (streaming) bulbAlpha else 1f),
+                    modifier = Modifier.size(16.dp),
+                )
+                Text(
+                    if (streaming) stringResource(R.string.chat_thinking_label)
+                    else stringResource(R.string.chat_reasoning_done_label),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+                Icon(
+                    imageVector = Icons.Filled.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .graphicsLayer { rotationZ = if (expanded) 90f else 0f },
+                )
+            }
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(),
+            exit = shrinkVertically(),
+        ) {
+            Text(
+                reasoning,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
     }
 }
 
