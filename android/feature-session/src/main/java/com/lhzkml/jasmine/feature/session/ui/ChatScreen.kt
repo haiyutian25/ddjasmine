@@ -40,8 +40,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.PsychologyAlt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -294,43 +295,40 @@ private fun ChatEntryItem(entry: ChatEntry) {
 
 /**
  * The thinking block — collapsed by default, both while streaming (label
- * "思考中", brain icon pulsing) and once finished (label "思考过程", steady
- * icon). Tapping the header expands or re-folds the full reasoning text.
+ * "思考中" pulsing, drop-down triangle after it) and once finished (label
+ * "思考过程", steady). Tapping the header expands or re-folds the full
+ * reasoning text; the triangle flips up when expanded.
  */
 @Composable
 private fun CollapsibleReasoning(reasoning: String, streaming: Boolean = false) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val pulse = rememberInfiniteTransition(label = "thinking")
-    val iconAlpha by pulse.animateFloat(
+    val textAlpha by pulse.animateFloat(
         initialValue = 0.35f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(animation = tween(700), repeatMode = RepeatMode.Reverse),
-        label = "brain",
+        label = "label",
     )
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { expanded = !expanded }
             .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = Icons.Filled.PsychologyAlt,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.tertiary
-                .copy(alpha = if (streaming) iconAlpha else 1f),
-        )
         Text(
             if (streaming) stringResource(R.string.chat_thinking_label)
             else stringResource(R.string.chat_reasoning_label),
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.tertiary,
+            color = MaterialTheme.colorScheme.tertiary
+                .copy(alpha = if (streaming) textAlpha else 1f),
         )
-        Text(
-            if (expanded) "收起" else "展开",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.secondary,
+        Icon(
+            imageVector = if (expanded) Icons.Filled.ArrowDropUp else Icons.Filled.ArrowDropDown,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.size(20.dp),
         )
     }
     if (expanded) {
@@ -355,7 +353,8 @@ private fun StreamingAssistantBlock(reasoning: String, text: String) {
     if (reasoning.isEmpty() && text.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
         if (reasoning.isNotEmpty()) {
-            CollapsibleReasoning(reasoning = reasoning, streaming = true)
+            // The thinking phase is over once body text starts arriving.
+            CollapsibleReasoning(reasoning = reasoning, streaming = text.isEmpty())
         }
         if (text.isNotEmpty()) {
             StreamingMarkdown(text)
@@ -509,7 +508,12 @@ private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
-            Markdown(content = content)
+            // immediate=true parses synchronously so the row is born with
+            // its full height: an async-loading (zero-height) assistant row
+            // right after the streaming row is removed collapses the list
+            // and clamps the scroll position back to the top.
+            val mdState = rememberMarkdownState(content = content, retainState = true, immediate = true)
+            Markdown(markdownState = mdState)
         }
         Text(
             DateFormat.getTimeInstance().format(Date(timeMs)),
