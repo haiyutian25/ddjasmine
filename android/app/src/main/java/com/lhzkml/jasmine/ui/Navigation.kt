@@ -6,8 +6,8 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
+import com.lhzkml.jasmine.feature.plugin.navigation.PluginEntryProvider
 import com.lhzkml.jasmine.feature.plugin.navigation.PluginList
-import com.lhzkml.jasmine.feature.plugin.ui.PluginScreen
 import com.lhzkml.jasmine.feature.session.navigation.Chat
 import com.lhzkml.jasmine.feature.session.navigation.ProviderEdit
 import com.lhzkml.jasmine.feature.session.navigation.ProviderList
@@ -54,9 +54,7 @@ fun JasmineNavigation() {
                     onDone = { backStack.removeLastOrNull() },
                 )
             }
-            entry<PluginList> {
-                PluginScreen()
-            }
+            PluginEntryProvider(backStack)
         }
     )
 }
