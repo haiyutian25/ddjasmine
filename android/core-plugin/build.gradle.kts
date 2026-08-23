@@ -43,6 +43,15 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    // dlopen-based exec shim (ExecBridge): lets plugins run PIE executables
+    // extracted to the noexec filesDir by loading them as shared objects.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 }
 
 kotlin {

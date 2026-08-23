@@ -16,6 +16,7 @@ import com.lhzkml.jasmine.core.plugin.rust.FfiPluginRecord
 import com.lhzkml.jasmine.core.plugin.rust.FfiSignatureStrategy
 import com.lhzkml.jasmine.core.plugin.rust.FfiVerdict
 import com.lhzkml.jasmine.core.plugin.rust.PluginCoreHandle
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,6 +71,9 @@ object PluginHost {
     private var lifecycle: LifecycleExecutor? = null
     private var app: Application? = null
 
+    /** Completes once [initialize] finishes; [awaitReady] suspends on it. */
+    private val ready = CompletableDeferred<Unit>()
+
     /** Host-settable authorization hook; Ask verdicts fail closed without it. */
     var authorizationHandler: AuthorizationHandler? = null
 
@@ -122,6 +126,21 @@ object PluginHost {
     fun releaseIsolation(pluginId: String) =
         com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager.release(pluginId)
 
+    /**
+     * Publishes a Binder-backed cross-process service. In the isolated
+     * process this registers into the process-local bridge directory; see
+     * [com.lhzkml.jasmine.core.plugin.process.RemoteServices].
+     */
+    fun publishRemoteService(
+        key: com.lhzkml.jasmine.core.plugin.process.RemoteServiceKey,
+        service: android.os.IBinder,
+    ) = com.lhzkml.jasmine.core.plugin.process.RemoteServices.publish(key, service)
+
+    /** Resolves a Binder-backed cross-process service (local-first, then bridge). */
+    fun resolveRemoteService(
+        key: com.lhzkml.jasmine.core.plugin.process.RemoteServiceKey,
+    ): android.os.IBinder? = com.lhzkml.jasmine.core.plugin.process.RemoteServices.resolve(key)
+
     /** Checks and installs updates for every installed plugin (best effort). */
     suspend fun applyAvailableUpdates(): List<String> = withContext(Dispatchers.IO) {
         val channel = updateChannel() ?: return@withContext emptyList()
@@ -146,11 +165,21 @@ object PluginHost {
 
     /**
      * Opens the decision core (recovering crash-interrupted ledger
-     * rotations) and loads every enabled plugin.
+     * rotations) and loads every enabled plugin. [loadFilter] decides which
+     * records auto-load in this process — the host filters out isolated
+     * plugins, the isolated process loads nothing up front (it is driven by
+     * [IsolatedPluginProcessService] instead).
      */
-    suspend fun initialize(application: Application, policy: SignaturePolicy) = withContext(Dispatchers.IO) {
+    suspend fun initialize(
+        application: Application,
+        policy: SignaturePolicy,
+        loadFilter: (FfiPluginRecord) -> Boolean = { true },
+    ) = withContext(Dispatchers.IO) {
         mutex.withLock {
-            if (core != null) return@withLock
+            if (core != null) {
+                if (!ready.isCompleted) ready.complete(Unit)
+                return@withLock
+            }
             val handle = PluginCoreHandle.open(
                 path = File(application.filesDir, "plugins.json").absolutePath,
                 strategy = policy.toFfi(),
@@ -169,9 +198,15 @@ object PluginHost {
             executor = install
             lifecycle = lc
             app = application
-            lc.loadEnabled(handle.allRecords())
+            lc.loadEnabled(handle.allRecords().filter(loadFilter))
             refreshMenuEntries(lc)
+            ready.complete(Unit)
         }
+    }
+
+    /** Suspends until [initialize] has finished (idempotent once ready). */
+    suspend fun awaitReady() {
+        ready.await()
     }
 
     /**
@@ -258,6 +293,12 @@ object PluginHost {
                 install.rollback(metadata.packageName, backup)
                 throw e
             }
+            // Persist the isolation placement declared by the package; the
+            // actual process move happens at launch time.
+            if (metadata.isolated) {
+                com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager
+                    .markIsolated(metadata.packageName)
+            }
             record
         }
     }
@@ -314,8 +355,21 @@ object PluginHost {
     /**
      * Loads a plugin; when it is already loaded, executes the core's
      * chained-restart plan instead (dependents unload first, reload last).
+     *
+     * Isolated plugins never load in the host process: a launch from the
+     * host delegates to the isolated process, while the isolated process
+     * itself loads directly (its [initialize] load-filter already kept the
+     * plugin out of the host).
      */
     suspend fun launchPlugin(pluginId: String): Unit = withContext(Dispatchers.IO) {
+        val isolated = com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager
+            .isIsolated(pluginId)
+        val inIsolatedProcess = com.lhzkml.jasmine.core.plugin.process.ProcessIdentity
+            .isIsolatedProcess(requireApp())
+        if (isolated && !inIsolatedProcess) {
+            com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager.isolate(pluginId)
+            return@withContext
+        }
         mutex.withLock {
             val handle = requireCore()
             val lc = requireLifecycle()

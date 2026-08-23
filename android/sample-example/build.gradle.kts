@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.File
 
 /**
  * 功能示例插件：完整演示 Activity/Service/Receiver/Provider/native so/热更。
@@ -48,6 +49,42 @@ kotlin {
 
 pluginPack {
     packageIdSlot.set(3) // 资源包 id 0x83
+}
+
+// ---------------------------------------------------------------------------
+// 把 cmake 编译出的 PIE hello 复制到 assets/exec/hello，随插件 APK 分发；
+// 框架提取后经 ExecBridge 的 dlopen 桥运行（验证 noexec 下的可执行资产）。
+// 产物落 build/generated，不污染源码树；挂在 mergeAssets 前避免与
+// externalNativeBuild 形成 preBuild 循环依赖。
+// ---------------------------------------------------------------------------
+android {
+    sourceSets {
+        getByName("main") {
+            assets.srcDir("build/generated/execAssets")
+        }
+    }
+}
+
+val copyHelloExec by tasks.registering {
+    group = "build"
+    description = "Copies the PIE hello binary into assets/exec for the ExecBridge"
+    dependsOn("externalNativeBuildRelease")
+    val projectDirPath = projectDir.absolutePath
+    doLast {
+        val root = File(projectDirPath, "build/intermediates/cxx")
+        val hello = root.walkTopDown().firstOrNull {
+            it.isFile && it.name == "hello" && it.parentFile?.name == "arm64-v8a"
+        }
+        if (hello != null) {
+            val dest = File(projectDirPath, "build/generated/execAssets/exec/hello")
+            dest.parentFile.mkdirs()
+            hello.copyTo(dest, overwrite = true)
+        }
+    }
+}
+
+tasks.matching { it.name == "mergeReleaseAssets" }.configureEach {
+    dependsOn(copyHelloExec)
 }
 
 dependencies {

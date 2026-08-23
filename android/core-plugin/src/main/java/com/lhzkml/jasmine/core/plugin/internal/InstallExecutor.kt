@@ -33,6 +33,7 @@ internal class InstallExecutor(private val context: Context) {
         const val META_ENTRY_CLASS = "jasmine.plugin.entryClass"
         const val META_DESCRIPTION = "jasmine.plugin.description"
         const val META_CAPABILITIES = "jasmine.plugin.capabilities"
+        const val META_ISOLATED = "jasmine.plugin.isolated"
         const val PAYLOAD_NAME = "base.apk"
         const val CLASS_INDEX_NAME = "class_index"
         const val LIB_DIR = "lib"
@@ -48,6 +49,7 @@ internal class InstallExecutor(private val context: Context) {
         val entryClass: String,
         val description: String,
         val capabilities: List<String>,
+        val isolated: Boolean,
     )
 
     fun pluginDir(pluginId: String): File = File(context.filesDir, "plugins/$pluginId")
@@ -79,6 +81,7 @@ internal class InstallExecutor(private val context: Context) {
             ?.map { it.trim().lowercase() }
             ?.filter { it.isNotBlank() }
             ?: emptyList()
+        val isolated = meta.getBoolean(META_ISOLATED, false)
         return Metadata(
             packageName = info.packageName
                 ?: throw InstallException("插件包缺少 package 名: ${apk.absolutePath}"),
@@ -89,6 +92,7 @@ internal class InstallExecutor(private val context: Context) {
             entryClass = entryClass,
             description = meta.getString(META_DESCRIPTION).orEmpty(),
             capabilities = capabilities,
+            isolated = isolated,
         )
     }
 

@@ -3,6 +3,7 @@ package com.lhzkml.jasmine.core.plugin
 import android.app.Application
 import com.lhzkml.jasmine.core.plugin.crash.CrashHook
 import com.lhzkml.jasmine.core.plugin.crash.PluginCrashCallback
+import com.lhzkml.jasmine.core.plugin.process.ProcessIdentity
 import com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager
 import com.lhzkml.jasmine.core.plugin.proxy.ServiceProxyPool
 import com.lhzkml.jasmine.core.plugin.proxy.defaultServicePool
@@ -39,8 +40,18 @@ open class PluginHostApplication : Application() {
         ServiceProxyPool.configure(defaultServicePool)
         ProcessIsolationManager.attach(this)
         CoroutineScope(Dispatchers.IO).launch {
-            PluginHost.initialize(this@PluginHostApplication, pluginPolicy())
-            onPluginFrameworkReady()()
+            if (ProcessIdentity.isIsolatedProcess(this@PluginHostApplication)) {
+                // Isolated process: init the runtime but load nothing up
+                // front — IsolatedPluginProcessService drives the load.
+                PluginHost.initialize(this@PluginHostApplication, pluginPolicy()) { false }
+            } else {
+                // Host process: init and auto-load every enabled plugin
+                // except those placed in the isolated process.
+                PluginHost.initialize(this@PluginHostApplication, pluginPolicy()) { record ->
+                    !ProcessIsolationManager.isIsolated(record.pluginId)
+                }
+                onPluginFrameworkReady()()
+            }
         }
     }
 }

@@ -12,13 +12,11 @@ import java.io.InputStream
  * [InstallExecutor]). Proot-style user-space binaries run here.
  *
  * Android 10+ mounts `filesDir` noexec, so a plain `execve` of an extracted
- * file fails on modern devices. [run] therefore documents that constraint
- * and exposes two paths:
- *  1. [run] — direct `ProcessBuilder` execution; works only where the mount
- *     permits it, and always requires the `EXEC` capability grant.
- *  2. [dlopenBridgeAvailable] — whether a dlopen-based bridge (load the
- *     executable as a shared object and call its `main`) is wired; the
- *     actual bridging is left to a native shim the host supplies.
+ * file fails on modern devices. [runNative] therefore prefers the dlopen
+ * bridge — the native shim `libexecbridge.so` loads the executable (a PIE
+ * built with `-fPIE -pie` exporting `main`) as a shared object and runs its
+ * `main` — and [run] falls back to direct `ProcessBuilder` execution only
+ * where the mount permits it.
  *
  * Every launch is gated through [PluginHost.checkCapability] with the `EXEC`
  * capability, so an undeclared plugin cannot spawn binaries.
@@ -32,8 +30,28 @@ class ExecBridge(private val application: Application) {
     }
 
     /**
-     * Runs an executable asset, gating on the `EXEC` capability. Returns the
-     * running process, or null when the capability is denied.
+     * Runs an executable asset via the dlopen bridge (noexec-safe). Blocks
+     * until the program's `main` returns; returns its exit code, or a
+     * negative bridge error code (`-1` path unreadable, `-2` dlopen failed,
+     * `-3` no `main`, `-4`/`-5` allocation/thread failure).
+     */
+    suspend fun runNative(
+        pluginId: String,
+        name: String,
+        args: List<String> = emptyList(),
+    ): Int {
+        if (!PluginHost.checkCapability(FfiCapability.EXEC, pluginId)) return -100
+        val binary = executablePath(pluginId, name)
+            ?: throw IllegalArgumentException("可执行资产不存在: $pluginId/$name")
+        if (!dlopenBridgeAvailable()) {
+            throw IllegalStateException("dlopen 桥不可用（libexecbridge.so 未加载）")
+        }
+        return nativeRun(binary.absolutePath, args.toTypedArray())
+    }
+
+    /**
+     * Runs an executable asset directly via `ProcessBuilder`. Works only
+     * where the mount permits exec; prefer [runNative] on Android 10+.
      */
     suspend fun run(
         pluginId: String,
@@ -53,13 +71,31 @@ class ExecBridge(private val application: Application) {
     }
 
     /**
-     * Whether a dlopen-based exec bridge is available. The bridge loads an
-     * executable asset as a shared object and invokes its `main`, sidestepping
-     * the noexec mount. False by default until a host native shim registers.
+     * Whether the dlopen-based exec bridge is available — true once
+     * `libexecbridge.so` loads and its probe answers (bionic linker supports
+     * PIE dlopen).
      */
-    fun dlopenBridgeAvailable(): Boolean = false
+    fun dlopenBridgeAvailable(): Boolean = bridgeLoaded
 
     /** Drains a process's merged output to a string (best effort). */
     fun readAll(input: InputStream): String =
         input.bufferedReader().use { it.readText() }
+
+    private external fun nativeRun(path: String, args: Array<String>): Int
+
+    private external fun nativeBridgeProbe(): Int
+
+    companion object {
+        @Volatile
+        private var bridgeLoaded = false
+
+        init {
+            try {
+                System.loadLibrary("execbridge")
+                bridgeLoaded = true
+            } catch (_: Throwable) {
+                bridgeLoaded = false
+            }
+        }
+    }
 }

@@ -190,18 +190,36 @@ P2  缺口 2（可执行资产） → Proot 才可落地
 
 ### 6.4 缺口 2（可执行资产）✅
 - `InstallExecutor` 提取 `assets/exec/` 到 `exec/` 目录并 `+x`。
-- 新增 `proxy/ExecBridge`：`executablePath` / `run`（`EXEC` 能力门控）/ dlopen 桥接探测。
+- 新增 `proxy/ExecBridge`：`executablePath` / `run`（`ProcessBuilder` 直跑）/ `runNative`
+  （dlopen 桥，`EXEC` 能力门控）。
+- **native shim `libexecbridge.so`**（`core-plugin/src/main/cpp/exec_bridge.c` + CMake）：
+  `dlopen` 加载 PIE 可执行资产 → `dlsym("main")` → 新线程运行，规避 Android 10+ noexec。
+- 验证产物：`sample-example` 的 `hello.c`（PIE）编译后经 `copyHelloExec` 复制到
+  `assets/exec/hello`，随插件分发。
 
-### 6.5 缺口 3+6（进程隔离 + 跨进程服务）✅
-- 新增 `process/PluginProcessBridge`：手写 Binder `IInterface`（无 AIDL），name→Binder 目录。
-- 新增 `process/IsolatedPluginProcessService`：`android:process=":plugin_isolated"` 隔离进程宿主。
-- 新增 `process/ProcessIsolationManager`：plugin→process 映射、isolate/release、host 桥。
-- `PluginHost.isolatePlugin` / `releaseIsolation` 暴露。
+### 6.5 缺口 3（进程隔离）✅
+- 新增 `process/ProcessIdentity`：`/proc/self/cmdline` 进程名探测。
+- 新增 `process/IsolatedPluginProcessService`：`:plugin_isolated` 进程宿主，`awaitReady` 后
+  真正加载插件。
+- 新增 `process/ProcessIsolationManager`：plugin→process 映射持久化（JSON）、
+  isolate/release/mark。
+- `PluginHostApplication` 按进程分流：宿主加载非隔离插件，隔离进程不自动加载；
+  `PluginHost.initialize` 新增 `loadFilter`；`launchPlugin` 感知隔离转交；
+  `InstallExecutor` 解析 `jasmine.plugin.isolated` meta-data。
 
-### 6.6 已知边界（后续硬化方向）
-- `ExecBridge.run` 在 Android 10+ noexec 挂载下直接 `execve` 会失败，需宿主接入 dlopen 桥
-  （`dlopenBridgeAvailable()` 目前返回 false，预留了接入点）。
-- `ProcessIsolationManager.isolate` 的绑定是异步的；隔离进程内插件的完整重载依赖宿主在
-  绑定回调后调用 `launchPlugin`（已预留）。
-- 跨进程服务桥是 name→Binder 目录，服务语义由插件暴露的 token 承载，尚未接入
-  `ServiceKey` 的自动代理包装。
+### 6.6 缺口 6（跨进程服务）✅
+- `PluginProcessBridge` 的 Server 单例化（多次 bind 共享同一 name→Binder 目录）。
+- 新增 `process/RemoteServices` + `RemoteServiceKey`：隔离进程 `publish`（进程内直注册），
+  宿主 `resolve`（本地优先、跨进程走 bound bridge）。
+- `PluginHost.publishRemoteService` / `resolveRemoteService` 暴露。
+
+### 6.7 验证与边界
+- **验证**：Rust 148 测试通过；`assembleRelease` 全量构建成功；`libexecbridge.so` 编译 4 ABI；
+  `hello` PIE 打进插件 `assets/exec/hello`。
+- **真机验证路径**：
+  1. 给插件加 `jasmine.plugin.isolated=true` meta-data → 观察 logcat 插件在 `:plugin_isolated`
+     进程加载；
+  2. 调用 `PluginHost.execBridge().runNative(pluginId, "hello", listOf("a","b"))` → 返回 42；
+  3. 隔离进程发布 Binder 服务 → 宿主 `resolveRemoteService` 解析。
+- **边界**：`ExecBridge.runNative` 要求资产为 `-fPIE -pie` 且导出 `main`；`dlopen` 的
+  PIE 支持依赖 bionic linker（API 21+ 基本支持）。跨进程服务 value 必须是 `IBinder`。
