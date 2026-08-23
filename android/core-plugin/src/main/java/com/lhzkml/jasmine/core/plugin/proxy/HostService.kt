@@ -19,29 +19,41 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * a bare class-name prefix.
  */
 object ServiceProxyPool {
-    private val available = ConcurrentLinkedQueue<Class<out HostService>>()
+    private val hostAvailable = ConcurrentLinkedQueue<Class<out HostService>>()
+    private val isolatedAvailable = ConcurrentLinkedQueue<Class<out HostService>>()
     private val active = ConcurrentHashMap<String, Class<out HostService>>()
 
-    /** Replaces the pool (host setup calls once with its manifest-registered proxies). */
+    /** Replaces the in-process pool (host setup calls once). */
     fun configure(proxies: List<Class<out HostService>>) {
-        available.clear()
+        hostAvailable.clear()
         active.clear()
-        available.addAll(proxies)
+        hostAvailable.addAll(proxies)
     }
 
-    val capacity: Int get() = available.size + active.size
+    /** Replaces the isolated-process pool (host setup calls once). */
+    fun configureIsolated(proxies: List<Class<out HostService>>) {
+        isolatedAvailable.clear()
+        isolatedAvailable.addAll(proxies)
+    }
+
+    val capacity: Int get() = hostAvailable.size + isolatedAvailable.size + active.size
 
     /**
      * Resumes the running instance of `serviceClassName:taskId` if one is
-     * active (exact id match), else takes a free proxy. Null when the pool
-     * is exhausted — no queuing.
+     * active (exact id match), else takes a free proxy from the pool matching
+     * the owning plugin's process placement (isolated plugins use the
+     * `:plugin_isolated` slots, so the service runs in that plugin's process).
+     * Null when the pool is exhausted — no queuing.
      */
     fun acquire(serviceClassName: String, taskId: String): Pair<String, Class<out HostService>>? {
         val instanceId = "$serviceClassName:$taskId"
         active[instanceId]?.let { return instanceId to it }
-        val proxy = available.poll() ?: return null
+        val pluginId = ownerPluginOf(serviceClassName)
+        val isolated = pluginId.isNotEmpty() &&
+            com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager.isIsolated(pluginId)
+        val proxy = (if (isolated) isolatedAvailable else hostAvailable).poll() ?: return null
         active[instanceId] = proxy
-        PluginHost.coreHandle.registerInstance(instanceId, ownerPluginOf(serviceClassName))
+        PluginHost.coreHandle.registerInstance(instanceId, pluginId)
         return instanceId to proxy
     }
 
@@ -49,7 +61,12 @@ object ServiceProxyPool {
     fun release(instanceId: String) {
         val proxy = active.remove(instanceId) ?: return
         PluginHost.coreHandle.unregisterInstance(instanceId)
-        available.offer(proxy)
+        // Return to the correct pool by matching the class's package/slot.
+        if (proxy.name.contains("IsolatedHostService")) {
+            isolatedAvailable.offer(proxy)
+        } else {
+            hostAvailable.offer(proxy)
+        }
     }
 
     /** Exact-match running instances of one service class (colon included). */

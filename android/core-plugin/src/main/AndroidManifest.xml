@@ -7,10 +7,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>
-        <!-- Single-proxy activity for all plugin activities -->
+        <!-- Proxy activity slots: one per launch mode, so plugin activities
+             can pick standard / singleTop / singleTask / transparent without
+             colliding on a single host activity. -->
         <activity
             android:name=".proxy.HostActivity"
             android:exported="false" />
+        <activity
+            android:name=".proxy.HostActivitySingleTop"
+            android:exported="false"
+            android:launchMode="singleTop" />
+        <activity
+            android:name=".proxy.HostActivitySingleTask"
+            android:exported="false"
+            android:launchMode="singleTask" />
+        <activity
+            android:name=".proxy.HostActivityTransparent"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Centralized static-broadcast proxy: shared system action set -->
         <receiver
@@ -89,6 +103,33 @@
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="插件前台服务代理" />
+        </service>
+
+        <!-- Isolated-process service pool: runs services of plugins placed in
+             the isolated process, so bind/start cross the boundary natively. -->
+        <service android:name=".proxy.IsolatedHostService1" android:exported="false"
+            android:process=":plugin_isolated"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件隔离进程服务代理" />
+        </service>
+        <service android:name=".proxy.IsolatedHostService2" android:exported="false"
+            android:process=":plugin_isolated"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件隔离进程服务代理" />
+        </service>
+        <service android:name=".proxy.IsolatedHostService3" android:exported="false"
+            android:process=":plugin_isolated"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件隔离进程服务代理" />
+        </service>
+        <service android:name=".proxy.IsolatedHostService4" android:exported="false"
+            android:process=":plugin_isolated"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件隔离进程服务代理" />
         </service>
 
         <!-- Default authorization dialog (hosts can replace the handler) -->

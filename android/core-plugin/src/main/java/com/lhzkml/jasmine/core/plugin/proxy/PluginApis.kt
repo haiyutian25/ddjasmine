@@ -15,13 +15,17 @@ import java.net.URLEncoder
  * 经宿主代理组件与中心化 Provider 路由，无需感知宿主的代理类与代理 authority。
  */
 
-/** 启动一个插件 Activity（框架自动解析单占坑代理），可携带额外 Intent 数据。 */
+/**
+ * 启动一个插件 Activity（框架按 [launchMode] 路由到对应占坑代理），
+ * 可携带额外 Intent 数据。
+ */
 fun Context.startPluginActivity(
     pluginActivityClass: Class<*>,
+    launchMode: PluginLaunchMode = PluginLaunchMode.Standard,
     block: Intent.() -> Unit = {},
 ) {
     startActivity(
-        Intent(this, HostActivity::class.java).apply {
+        Intent(this, launchMode.proxyClass()).apply {
             putExtra(ProxyKeys.ACTIVITY_CLASS, pluginActivityClass.name)
             block()
         },

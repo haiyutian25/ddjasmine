@@ -17,7 +17,14 @@ internal class LoadedPlugin(
     val classLoader: PluginClassLoader,
     val entry: PluginEntry,
     val resources: android.content.res.Resources,
-)
+) {
+    /** Releases native resource tables (API 30+ close) on unload. */
+    fun release() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching { resources.assets.close() }
+        }
+    }
+}
 
 /** Lifecycle failure surfaced to the host (never swallowed). */
 fun interface LoadFailureCallback {
@@ -34,6 +41,7 @@ internal class LifecycleExecutor(
     private val core: PluginCoreHandle,
     private val payloadFile: (String) -> File,
     private val libDir: (String) -> File,
+    private val readDependencies: (String) -> List<String> = { emptyList() },
     var failureCallback: LoadFailureCallback? = null,
 ) {
     private val loaded = ConcurrentHashMap<String, LoadedPlugin>()
@@ -66,6 +74,26 @@ internal class LifecycleExecutor(
         val pluginId = record.pluginId
         if (loaded.containsKey(pluginId)) return
         check(record.enabled) { "插件已禁用: $pluginId" }
+
+        // Declared-dependency preload: load not-yet-loaded dependencies first
+        // (dependency order), then record the edges so dependent-ordered
+        // unload and chained restart work. A missing/uninstalled dependency
+        // is reported but not fatal — borrow-on-first-use still backstops it.
+        val dependencies = readDependencies(pluginId)
+        for (dep in dependencies) {
+            if (dep == pluginId || loaded.containsKey(dep)) continue
+            val depRecord = core.pluginRecord(dep)
+            if (depRecord == null) {
+                failureCallback?.onFailure(
+                    pluginId,
+                    "dependency",
+                    IllegalStateException("依赖插件未安装: $dep"),
+                )
+                continue
+            }
+            if (depRecord.enabled) load(depRecord)
+        }
+        core.declareDependencies(pluginId, dependencies)
 
         val classLoader = PluginClassLoader(
             pluginId = pluginId,
@@ -117,6 +145,7 @@ internal class LifecycleExecutor(
         } catch (e: Throwable) {
             failureCallback?.onFailure(pluginId, "unload", e)
         }
+        plugin.release()
         core.pluginUnloaded(pluginId)
         onChange?.invoke()
     }

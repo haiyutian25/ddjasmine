@@ -34,10 +34,13 @@ internal class InstallExecutor(private val context: Context) {
         const val META_DESCRIPTION = "jasmine.plugin.description"
         const val META_CAPABILITIES = "jasmine.plugin.capabilities"
         const val META_ISOLATED = "jasmine.plugin.isolated"
+        const val META_DEPENDENCIES = "jasmine.plugin.dependencies"
         const val PAYLOAD_NAME = "base.apk"
         const val CLASS_INDEX_NAME = "class_index"
         const val LIB_DIR = "lib"
         const val EXEC_DIR = "exec"
+        const val PERMISSIONS_NAME = "permissions"
+        const val DEPENDENCIES_NAME = "dependencies"
     }
 
     class Metadata(
@@ -50,6 +53,7 @@ internal class InstallExecutor(private val context: Context) {
         val description: String,
         val capabilities: List<String>,
         val isolated: Boolean,
+        val dependencies: List<String>,
     )
 
     fun pluginDir(pluginId: String): File = File(context.filesDir, "plugins/$pluginId")
@@ -82,6 +86,11 @@ internal class InstallExecutor(private val context: Context) {
             ?.filter { it.isNotBlank() }
             ?: emptyList()
         val isolated = meta.getBoolean(META_ISOLATED, false)
+        val dependencies = meta.getString(META_DEPENDENCIES)
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
         return Metadata(
             packageName = info.packageName
                 ?: throw InstallException("插件包缺少 package 名: ${apk.absolutePath}"),
@@ -93,6 +102,7 @@ internal class InstallExecutor(private val context: Context) {
             description = meta.getString(META_DESCRIPTION).orEmpty(),
             capabilities = capabilities,
             isolated = isolated,
+            dependencies = dependencies,
         )
     }
 
@@ -276,6 +286,46 @@ internal class InstallExecutor(private val context: Context) {
             event = parser.next()
         }
         return receivers
+    }
+
+    /**
+     * Parses the plugin's `uses-permission` list via PackageManager. The
+     * plugin runs with the host's permission set, so this is surfaced to the
+     * host for pre-declaration and validation, not merged (Android cannot
+     * grant permissions at runtime).
+     */
+    fun parsePermissions(apk: File): List<String> {
+        val info = context.packageManager.getPackageArchiveInfo(
+            apk.absolutePath,
+            PackageManager.GET_PERMISSIONS,
+        ) ?: return emptyList()
+        return info.requestedPermissions?.toList() ?: emptyList()
+    }
+
+    /** Writes the plugin's requested-permission list (one per line). */
+    fun writePermissions(pluginId: String, permissions: List<String>) {
+        File(pluginDir(pluginId), PERMISSIONS_NAME)
+            .writeText(permissions.joinToString("\n"))
+    }
+
+    /** Reads the persisted requested-permission list, or empty. */
+    fun readPermissions(pluginId: String): List<String> {
+        val file = File(pluginDir(pluginId), PERMISSIONS_NAME)
+        if (!file.exists()) return emptyList()
+        return file.readLines().filter { it.isNotBlank() }
+    }
+
+    /** Writes the plugin's declared dependency ids (one per line). */
+    fun writeDependencies(pluginId: String, dependencies: List<String>) {
+        File(pluginDir(pluginId), DEPENDENCIES_NAME)
+            .writeText(dependencies.joinToString("\n"))
+    }
+
+    /** Reads the persisted declared dependency ids, or empty. */
+    fun readDependencies(pluginId: String): List<String> {
+        val file = File(pluginDir(pluginId), DEPENDENCIES_NAME)
+        if (!file.exists()) return emptyList()
+        return file.readLines().filter { it.isNotBlank() }
     }
 
     /** Parses providers via PackageManager (it does surface these). */

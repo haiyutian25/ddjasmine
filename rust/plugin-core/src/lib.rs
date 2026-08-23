@@ -183,6 +183,19 @@ impl PluginCore {
         }
     }
 
+    /// Declares install-time dependencies for `plugin_id` (borrower) on
+    /// `dependencies` (lenders). Reuses the borrow graph so dependency-ordered
+    /// load/unload and chained restart work unchanged. Call at **load** time:
+    /// [`PluginCore::plugin_unloaded`] clears the edges, and dependencies must
+    /// be re-declared on the next load. Self-edges are ignored.
+    pub fn declare_dependencies(&mut self, plugin_id: &str, dependencies: &[String]) {
+        for dep in dependencies {
+            if dep != plugin_id {
+                self.topology.record_borrow(plugin_id, dep);
+            }
+        }
+    }
+
     /// The deterministic chained-restart plan for updating `plugin_id`.
     #[must_use]
     pub fn restart_plan(&self, plugin_id: &str) -> RestartPlan {

@@ -7,6 +7,7 @@ import com.lhzkml.jasmine.core.plugin.process.ProcessIdentity
 import com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager
 import com.lhzkml.jasmine.core.plugin.proxy.ServiceProxyPool
 import com.lhzkml.jasmine.core.plugin.proxy.defaultServicePool
+import com.lhzkml.jasmine.core.plugin.proxy.isolatedServicePool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -38,6 +39,7 @@ open class PluginHostApplication : Application() {
             CrashHook.install(crashCallback)
         }
         ServiceProxyPool.configure(defaultServicePool)
+        ServiceProxyPool.configureIsolated(isolatedServicePool)
         ProcessIsolationManager.attach(this)
         CoroutineScope(Dispatchers.IO).launch {
             if (ProcessIdentity.isIsolatedProcess(this@PluginHostApplication)) {

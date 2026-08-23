@@ -1,6 +1,8 @@
 package com.lhzkml.jasmine.core.plugin
 
 import android.app.Application
+import android.content.pm.PackageManager
+import android.util.Log
 import com.lhzkml.jasmine.core.plugin.internal.InstallException
 import com.lhzkml.jasmine.core.plugin.internal.InstallExecutor
 import com.lhzkml.jasmine.core.plugin.internal.LifecycleExecutor
@@ -74,6 +76,19 @@ object PluginHost {
     /** Completes once [initialize] finishes; [awaitReady] suspends on it. */
     private val ready = CompletableDeferred<Unit>()
 
+    /** Optional structured-event observer (logging / metrics / crash aggregation). */
+    @Volatile
+    private var eventListener: PluginEventListener? = null
+
+    /** Registers (or clears) the runtime event observer. */
+    fun setEventListener(listener: PluginEventListener?) {
+        eventListener = listener
+    }
+
+    private fun emit(event: PluginEvent) {
+        eventListener?.onEvent(event)
+    }
+
     /** Host-settable authorization hook; Ask verdicts fail closed without it. */
     var authorizationHandler: AuthorizationHandler? = null
 
@@ -123,8 +138,10 @@ object PluginHost {
         com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager.isolate(pluginId)
 
     /** Releases a plugin's isolation (stops its private process). */
-    fun releaseIsolation(pluginId: String) =
+    fun releaseIsolation(pluginId: String) {
         com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager.release(pluginId)
+        emit(PluginEvent.IsolationReleased(pluginId))
+    }
 
     /**
      * Publishes a Binder-backed cross-process service. In the isolated
@@ -191,6 +208,7 @@ object PluginHost {
                 core = handle,
                 payloadFile = install::payloadFile,
                 libDir = install::libDir,
+                readDependencies = install::readDependencies,
                 failureCallback = loadFailureCallback,
             )
             lc.onChange = { refreshMenuEntries(lc) }
@@ -248,6 +266,7 @@ object PluginHost {
             val classes = com.lhzkml.jasmine.core.plugin.internal.DexScanner.scanClassNames(apk)
             val receivers = install.parseReceivers(apk)
             val providers = install.parseProviders(apk)
+            val permissions = install.parsePermissions(apk)
 
             // Capability declaration: parse from metadata, adjudicate through
             // the charter (escalate to user grant until each is authorized),
@@ -282,6 +301,8 @@ object PluginHost {
             }
 
             val backup = install.placePayload(metadata.packageName, apk, classes)
+            install.writePermissions(metadata.packageName, permissions)
+            install.writeDependencies(metadata.packageName, metadata.dependencies)
             val record = install.buildRecord(
                 metadata, request.signatureDigests, packageSha256, classes, receivers, providers,
                 capabilities,
@@ -299,6 +320,11 @@ object PluginHost {
                 com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager
                     .markIsolated(metadata.packageName)
             }
+            // Warn about permissions the plugin requests but the host does not
+            // declare — the plugin runs with the host's permission set, so a
+            // missing declaration means the feature silently won't work.
+            warnMissingHostPermissions(metadata.packageName, permissions)
+            emit(PluginEvent.Installed(metadata.packageName))
             record
         }
     }
@@ -348,6 +374,7 @@ object PluginHost {
             if (lc.isLoaded(pluginId)) lc.unload(pluginId)
             val record = requireCore().commitUninstall(pluginId)
             File(record.installPath).deleteRecursively()
+            emit(PluginEvent.Uninstalled(pluginId))
             record
         }
     }
@@ -368,6 +395,7 @@ object PluginHost {
             .isIsolatedProcess(requireApp())
         if (isolated && !inIsolatedProcess) {
             com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager.isolate(pluginId)
+            emit(PluginEvent.Isolated(pluginId))
             return@withContext
         }
         mutex.withLock {
@@ -383,11 +411,13 @@ object PluginHost {
                 lc.load(record)
             }
         }
+        emit(PluginEvent.Loaded(pluginId))
     }
 
     /** Unloads a running plugin; the registry entry stays. */
     suspend fun unloadPlugin(pluginId: String): Unit = withContext(Dispatchers.IO) {
         mutex.withLock { requireLifecycle().unload(pluginId) }
+        emit(PluginEvent.Unloaded(pluginId))
     }
 
     /** Enables or disables a plugin; takes effect on the next process start. */
@@ -490,9 +520,67 @@ object PluginHost {
         )
     }
 
+    /**
+     * 能力是否已声明：插件安装时在 manifest 声明并经 `adjudicate_capabilities`
+     * 裁决（拒绝则安装失败）。声明是运行时能力门控的唯一依据——不再重复授权。
+     */
+    fun hasCapability(capability: FfiCapability, pluginId: String): Boolean {
+        val record = pluginRecord(pluginId) ?: return false
+        return record.capabilities.contains(capability)
+    }
+
+    /**
+     * 强制能力门控：插件必须已声明该能力，否则抛 [SecurityException]。
+     * 与 [checkCapability]（软门控，返回布尔）互补，用于"未声明即失败"的
+     * 敏感设施（exec / gpu / network / storage / camera）。
+     */
+    fun requireCapability(capability: FfiCapability, pluginId: String) {
+        if (!hasCapability(capability, pluginId)) {
+            throw SecurityException(
+                "插件 [$pluginId] 未声明能力 ${capability.name}；请在 manifest 声明 " +
+                    "jasmine.plugin.capabilities 并在安装时授权",
+            )
+        }
+    }
+
+    /**
+     * The plugin's `uses-permission` list, parsed at install. The host must
+     * pre-declare these in its own manifest (Android cannot grant permissions
+     * at runtime); use this to verify coverage.
+     */
+    fun requiredPermissionsOf(pluginId: String): List<String> =
+        requireExecutor().readPermissions(pluginId)
+
+    /** Logs permissions a plugin requests but the host does not declare. */
+    private fun warnMissingHostPermissions(pluginId: String, permissions: List<String>) {
+        if (permissions.isEmpty()) return
+        val application = app ?: return
+        val hostPermissions = runCatching {
+            application.packageManager
+                .getPackageInfo(application.packageName, PackageManager.GET_PERMISSIONS)
+                .requestedPermissions?.toSet() ?: emptySet()
+        }.getOrDefault(emptySet())
+        val missing = permissions.filter { it !in hostPermissions }
+        if (missing.isNotEmpty()) {
+            Log.w(
+                "PluginRuntime",
+                "插件 [$pluginId] 声明了宿主未声明的权限，相关功能将失效: $missing",
+            )
+        }
+    }
+
     // --- proxy support (internal to the runtime) ----------------------------
 
     internal val coreHandle: PluginCoreHandle get() = requireCore()
+
+    /**
+     * Re-reads the ledger from disk ([PluginCoreHandle.repair]), reconciling
+     * registry/index/loaded. The isolated process calls this before loading a
+     * plugin so a host-side install/update is visible across the process
+     * boundary (the two processes hold independent in-memory ledgers).
+     */
+    suspend fun refreshLedger(): com.lhzkml.jasmine.core.plugin.rust.FfiAuditReport =
+        withContext(Dispatchers.IO) { requireCore().repair() }
 
     /** Instantiates a loaded plugin's component class (receiver, provider, …). */
     internal fun instantiateComponent(pluginId: String, className: String): Any {

@@ -86,9 +86,29 @@ internal class PluginAssetsProvider(
                     zip.getInputStream(entry).use { input ->
                         FileOutputStream(out).use { output -> input.copyTo(output) }
                     }
+                    enforceQuota()
                 }
                 val fd = ParcelFileDescriptor.open(out, ParcelFileDescriptor.MODE_READ_ONLY)
                 android.content.res.AssetFileDescriptor(fd, 0, entry.size)
             }
         }.getOrNull()
+
+    /**
+     * Bounds the extracted-asset cache. On overflow, drops oldest-first until
+     * back under the quota (the just-written entry is the newest and survives).
+     */
+    private fun enforceQuota() {
+        val files = cacheDir.listFiles() ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= QUOTA_BYTES) return
+        files.sortedBy { it.lastModified() }.forEach { f ->
+            if (total <= QUOTA_BYTES) return
+            total -= f.length()
+            f.delete()
+        }
+    }
+
+    private companion object {
+        const val QUOTA_BYTES = 64L * 1024 * 1024
+    }
 }

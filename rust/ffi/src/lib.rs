@@ -1259,6 +1259,12 @@ impl PluginCoreHandle {
         self.lock().locate_class(&class, borrower.as_deref()).into()
     }
 
+    /// Declares install-time dependencies for `plugin_id` on `dependencies`
+    /// (reusing the borrow graph). Call at load time.
+    pub fn declare_dependencies(&self, plugin_id: String, dependencies: Vec<String>) {
+        self.lock().declare_dependencies(&plugin_id, &dependencies);
+    }
+
     /// The deterministic chained-restart plan for updating `plugin_id`.
     pub fn restart_plan(&self, plugin_id: String) -> FfiRestartPlan {
         let plan = self.lock().restart_plan(&plugin_id);

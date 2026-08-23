@@ -40,7 +40,7 @@ class ExecBridge(private val application: Application) {
         name: String,
         args: List<String> = emptyList(),
     ): Int {
-        if (!PluginHost.checkCapability(FfiCapability.EXEC, pluginId)) return -100
+        PluginHost.requireCapability(FfiCapability.EXEC, pluginId)
         val binary = executablePath(pluginId, name)
             ?: throw IllegalArgumentException("可执行资产不存在: $pluginId/$name")
         if (!dlopenBridgeAvailable()) {
@@ -52,14 +52,15 @@ class ExecBridge(private val application: Application) {
     /**
      * Runs an executable asset directly via `ProcessBuilder`. Works only
      * where the mount permits exec; prefer [runNative] on Android 10+.
+     * Throws [SecurityException] when the plugin lacks the `EXEC` capability.
      */
     suspend fun run(
         pluginId: String,
         name: String,
         args: List<String> = emptyList(),
         workDir: File? = null,
-    ): Process? {
-        if (!PluginHost.checkCapability(FfiCapability.EXEC, pluginId)) return null
+    ): Process {
+        PluginHost.requireCapability(FfiCapability.EXEC, pluginId)
         val binary = executablePath(pluginId, name)
             ?: throw IllegalArgumentException("可执行资产不存在: $pluginId/$name")
         val command = mutableListOf(binary.absolutePath)

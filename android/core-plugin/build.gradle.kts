@@ -52,6 +52,20 @@ android {
             version = "3.22.1"
         }
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            it.systemProperty("robolectric.offline", "true")
+            // Point Robolectric at the locally-cached android-all jar (offline
+            // CI/dev boxes without maven central access).
+            it.systemProperty(
+                "robolectric.dependency.dir",
+                System.getProperty("user.home") +
+                    "/.m2/repository/org/robolectric/android-all-instrumented/15-robolectric-12650502-i7",
+            )
+        }
+    }
 }
 
 kotlin {
@@ -123,4 +137,5 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation(libs.junit)
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }

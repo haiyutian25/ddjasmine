@@ -35,6 +35,9 @@ class IsolatedPluginProcessService : Service() {
         val pluginId = intent?.getStringExtra(EXTRA_PLUGIN_ID) ?: return START_NOT_STICKY
         scope.launch {
             PluginHost.awaitReady()
+            // Reconcile the in-memory ledger with disk before loading: the host
+            // may have installed/updated plugins since this process opened it.
+            runCatching { PluginHost.refreshLedger() }
             runCatching { PluginHost.launchPlugin(pluginId) }
                 .onFailure { PluginHost.loadFailureCallback?.onFailure(pluginId, "isolated-load", it) }
         }
