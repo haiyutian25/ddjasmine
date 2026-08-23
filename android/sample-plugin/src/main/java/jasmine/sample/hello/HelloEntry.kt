@@ -63,7 +63,7 @@ class HelloEntry : PluginEntry {
 
     /** 点击菜单入口后由宿主渲染的插件主界面。 */
     @Composable
-    override fun Content() {
+    override fun MainScreen() {
         val context = LocalContext.current
         Column(
             modifier = Modifier.fillMaxSize().padding(24.dp),

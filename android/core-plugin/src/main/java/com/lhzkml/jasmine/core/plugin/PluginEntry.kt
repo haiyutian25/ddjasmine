@@ -76,5 +76,5 @@ interface PluginEntry {
      * [menuEntry]. Runs entirely inside the host's Compose tree.
      */
     @Composable
-    fun Content() {}
+    fun MainScreen() {}
 }

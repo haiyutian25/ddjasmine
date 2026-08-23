@@ -12,8 +12,9 @@ import androidx.activity.ComponentActivity
 
 /** Plugin-side activity contract; the host proxy forwards its lifecycle. */
 interface PluginActivity {
-    /** First step: the running proxy injects itself, before [onCreate]. */
-    fun onAttach(proxy: ComponentActivity)
+    /** Binds the running host proxy before [onCreate]; the plugin keeps the
+     *  reference to reach Context/Activity facilities. */
+    fun attach(proxy: ComponentActivity)
 
     fun onCreate(savedInstanceState: Bundle?)
     fun onStart()
@@ -36,7 +37,7 @@ open class BasePluginActivity : PluginActivity {
     protected var proxy: ComponentActivity? = null
         private set
 
-    override fun onAttach(proxy: ComponentActivity) {
+    override fun attach(proxy: ComponentActivity) {
         this.proxy = proxy
     }
 
@@ -58,8 +59,8 @@ open class BasePluginActivity : PluginActivity {
 
 /** Plugin-side service contract. */
 interface PluginService {
-    /** First step: the running proxy injects itself, before [onCreate]. */
-    fun onAttach(proxy: Service)
+    /** Binds the running host proxy before [onCreate]. */
+    fun attach(proxy: Service)
 
     fun onCreate()
     fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int
@@ -77,7 +78,7 @@ open class BasePluginService : PluginService {
     protected var proxy: Service? = null
         private set
 
-    override fun onAttach(proxy: Service) {
+    override fun attach(proxy: Service) {
         this.proxy = proxy
     }
 

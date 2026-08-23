@@ -104,7 +104,7 @@ open class HostService : Service() {
                 pluginService = (instance as? PluginService)
                     ?: throw IllegalStateException("$className 未实现 PluginService")
                 instanceId = intent?.getStringExtra(ProxyKeys.SERVICE_INSTANCE_ID)
-                pluginService?.onAttach(this)
+                pluginService?.attach(this)
                 pluginService?.onCreate()
             } catch (e: Throwable) {
                 PluginHost.loadFailureCallback?.onFailure(className.orEmpty(), "service", e)

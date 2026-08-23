@@ -35,6 +35,6 @@ fun PluginContentScreen(
             )
         }
     } else {
-        entry.Content()
+        entry.MainScreen()
     }
 }

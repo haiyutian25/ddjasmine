@@ -49,7 +49,7 @@ open class HostActivity : ComponentActivity() {
             val instance = PluginHost.instantiateComponent(pluginId, className)
             pluginActivity = (instance as? PluginActivity)
                 ?: throw IllegalStateException("$className 未实现 PluginActivity")
-            pluginActivity?.onAttach(this)
+            pluginActivity?.attach(this)
         } catch (e: Throwable) {
             pluginActivity = null
             PluginHost.loadFailureCallback?.onFailure(className, "activity", e)
