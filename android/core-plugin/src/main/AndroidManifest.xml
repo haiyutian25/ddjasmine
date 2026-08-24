@@ -6,6 +6,9 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 精确闹钟（插件后台任务调度），Android 12+ 需此权限 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
     <application>
         <!-- Proxy activity slots: one per launch mode, so plugin activities
              can pick standard / singleTop / singleTask / transparent without

@@ -9,6 +9,7 @@ import android.os.IBinder
 import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultRegistry
 
 /** Plugin-side activity contract; the host proxy forwards its lifecycle. */
 interface PluginActivity {
@@ -39,6 +40,10 @@ interface PluginActivity {
 open class BasePluginActivity : PluginActivity {
     protected var proxy: ComponentActivity? = null
         private set
+
+    /** 宿主代理的 ActivityResultRegistry（官方推荐替代已废弃的 onActivityResult）。 */
+    val activityResultRegistry: ActivityResultRegistry?
+        get() = proxy?.activityResultRegistry
 
     override fun attach(proxy: ComponentActivity) {
         this.proxy = proxy

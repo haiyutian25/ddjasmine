@@ -31,12 +31,18 @@ object PluginScheduler {
         taskId: String = "scheduled-$requestCode",
     ) {
         val am = context.getSystemService(AlarmManager::class.java) ?: return
-        am.setExactAndAllowWhileIdle(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            triggerAtMillis,
-            alarmIntent(context, pluginId, requestCode, serviceClassName, taskId),
-        )
+        val intent = alarmIntent(context, pluginId, requestCode, serviceClassName, taskId)
+        if (canScheduleExact(context, am)) {
+            am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAtMillis, intent)
+        } else {
+            // 无精确闹钟权限（Android 12+），降级为非精确触发
+            am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAtMillis, intent)
+        }
     }
+
+    /** 是否有精确闹钟权限（Android 12+ 需 SCHEDULE_EXACT_ALARM）。 */
+    private fun canScheduleExact(context: Context, am: AlarmManager): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms()
 
     /** 周期任务：自 `intervalMillis` 后每隔 `intervalMillis` 触发（非精确，系统批量对齐）。 */
     fun schedulePeriodic(
