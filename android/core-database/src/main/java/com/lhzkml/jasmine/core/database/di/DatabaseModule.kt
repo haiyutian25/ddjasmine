@@ -42,6 +42,6 @@ class DatabaseModule {
             appContext,
             JasmineDatabase::class.java,
             "Plugin"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 }

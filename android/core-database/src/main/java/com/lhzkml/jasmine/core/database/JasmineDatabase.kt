@@ -19,7 +19,8 @@ package com.lhzkml.jasmine.core.database
 import androidx.room.Database
 import androidx.room.RoomDatabase
 
-@Database(entities = [Plugin::class], version = 1)
+@Database(entities = [Plugin::class, PluginGrant::class], version = 2)
 abstract class JasmineDatabase : RoomDatabase() {
     abstract fun pluginDao(): PluginDao
+    abstract fun pluginGrantDao(): PluginGrantDao
 }
