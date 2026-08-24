@@ -3,9 +3,12 @@ package jasmine.buildlogic
 import org.gradle.api.DefaultTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.Internal
@@ -35,6 +38,11 @@ abstract class PluginPackExtension {
     @get:Input
     abstract val packageIdSlot: Property<Int>
 
+    /** 打包时排除的依赖 group（宿主已提供，不打进插件 DEX 以免冗余）。
+     *  匹配规则：group 相等或以其为前缀（如 "androidx" 排除 androidx.core 等）。 */
+    @get:Input
+    abstract val excludeGroups: ListProperty<String>
+
     @get:Input
     abstract val keystorePath: Property<String>
 
@@ -49,6 +57,7 @@ abstract class PluginPackExtension {
 
     init {
         packageIdSlot.convention(1)
+        excludeGroups.convention(listOf("org.jetbrains.kotlin", "androidx"))
         keystorePath.convention(
             File(System.getProperty("user.home"), ".android/debug.keystore").absolutePath,
         )
@@ -65,6 +74,10 @@ abstract class PluginPackagingTask : DefaultTask() {
 
     @get:Input
     abstract val packageIdSlot: Property<Int>
+
+    /** 插件自带远程 SDK：`implementation`（含传递）依赖的 jar 文件集合。 */
+    @get:Classpath
+    abstract val dependencyJars: ConfigurableFileCollection
 
     @get:Internal
     abstract val sdkDirectory: Property<File>
@@ -204,6 +217,9 @@ abstract class PluginPackagingTask : DefaultTask() {
         check(jars.isNotEmpty()) { "AAR 缺少 classes.jar" }
         val d8Inputs = buildList {
             jars.forEach { add(it.absolutePath) }
+            // 插件自带远程 SDK：把 implementation 依赖的 jar 一并 d8 进 DEX，
+            // 使插件可依赖宿主未提供的第三方库（如 Ktor、MCP Kotlin SDK）。
+            dependencyJars.files.forEach { add(it.absolutePath) }
             rClassesDir.walkTopDown()
                 .filter { it.isFile && it.extension == "class" }
                 .forEach { add(it.absolutePath) }
@@ -280,6 +296,22 @@ class PluginPackPlugin : Plugin<Project> {
                     ),
                 )
                 packageIdSlot.set(extension.packageIdSlot)
+                // 插件自带远程 SDK：把 `implementation`（含传递）依赖的 jar 一并
+                // d8 进 DEX，使插件可依赖宿主未提供的第三方库。`compileOnly` 不进
+                // runtime classpath，天然排除（仍从宿主 parent-first 解析）。
+                dependencyJars.from(
+                    project.provider {
+                        val runtimeClasspath =
+                            project.configurations.getByName("releaseRuntimeClasspath")
+                        val excluded = extension.excludeGroups.get()
+                        runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+                            .filter { art ->
+                                val group = art.moduleVersion.id.group
+                                excluded.none { group == it || group.startsWith("$it.") }
+                            }
+                            .map { it.file }
+                    },
+                )
                 sdkDirectory.set(sdkComponents.sdkDirectory.map { it.asFile }.get())
                 keystorePath.set(extension.keystorePath)
                 keystorePassword.set(extension.keystorePassword)
