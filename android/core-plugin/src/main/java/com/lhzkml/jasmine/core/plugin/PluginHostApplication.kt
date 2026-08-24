@@ -11,6 +11,7 @@ import com.lhzkml.jasmine.core.plugin.proxy.isolatedServicePool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * One-line host integration. Subclass this (or mirror its onCreate order):
@@ -35,12 +36,19 @@ open class PluginHostApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         val crashCallback = pluginCrashCallback()
+        val crashDir = File(filesDir, "crashed_plugins").apply { mkdirs() }
         if (crashCallback != null) {
-            CrashHook.install(crashCallback)
+            CrashHook.install(crashCallback, crashDir)
         }
         ServiceProxyPool.configure(defaultServicePool)
         ServiceProxyPool.configureIsolated(isolatedServicePool)
         ProcessIsolationManager.attach(this)
+        // 崩溃熔断：读取上次崩溃归因产生的标记，本次启动跳过这些插件，
+        // 避免反复崩溃拖垮宿主。
+        val crashedPlugins = crashDir.listFiles()
+            ?.filter { it.name.endsWith(".crash") }
+            ?.map { it.name.removeSuffix(".crash") }
+            ?.toSet() ?: emptySet()
         CoroutineScope(Dispatchers.IO).launch {
             if (ProcessIdentity.isIsolatedProcess(this@PluginHostApplication)) {
                 // Isolated process: init the runtime but load nothing up
@@ -48,9 +56,10 @@ open class PluginHostApplication : Application() {
                 PluginHost.initialize(this@PluginHostApplication, pluginPolicy()) { false }
             } else {
                 // Host process: init and auto-load every enabled plugin
-                // except those placed in the isolated process.
+                // except isolated-process plugins and crash-fused plugins.
                 PluginHost.initialize(this@PluginHostApplication, pluginPolicy()) { record ->
-                    !ProcessIsolationManager.isIsolated(record.pluginId)
+                    !ProcessIsolationManager.isIsolated(record.pluginId) &&
+                        record.pluginId !in crashedPlugins
                 }
                 onPluginFrameworkReady()()
             }

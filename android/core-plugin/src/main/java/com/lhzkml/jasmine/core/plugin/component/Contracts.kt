@@ -30,6 +30,9 @@ interface PluginActivity {
     fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean
     fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean
     fun onTouchEvent(event: MotionEvent?): Boolean
+    fun onNewIntent(intent: Intent)
+    fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?)
+    fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray)
 }
 
 /** No-op base implementation for plugin activities. */
@@ -55,6 +58,13 @@ open class BasePluginActivity : PluginActivity {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean = false
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean = false
     override fun onTouchEvent(event: MotionEvent?): Boolean = false
+    override fun onNewIntent(intent: Intent) {}
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {}
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray,
+    ) {}
 }
 
 /** Plugin-side service contract. */

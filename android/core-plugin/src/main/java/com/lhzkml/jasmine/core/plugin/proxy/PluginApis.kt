@@ -94,7 +94,7 @@ fun Context.pluginProxyUri(uri: Uri): Uri {
         .scheme("content")
         .authority(hostAuthority)
         .appendPath(URLEncoder.encode(pluginAuthority, "UTF-8"))
-        .apply { uri.pathSegments.drop(1).forEach { appendPath(it) } }
+        .apply { uri.pathSegments.forEach { appendPath(it) } }
         .apply { uri.encodedQuery?.let { encodedQuery(it) } }
         .build()
 }

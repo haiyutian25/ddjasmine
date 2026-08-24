@@ -85,7 +85,7 @@ object PluginHost {
         eventListener = listener
     }
 
-    private fun emit(event: PluginEvent) {
+    internal fun emit(event: PluginEvent) {
         eventListener?.onEvent(event)
     }
 
@@ -406,9 +406,21 @@ object PluginHost {
             if (lc.isLoaded(pluginId)) lc.unload(pluginId)
             val record = requireCore().commitUninstall(pluginId)
             File(record.installPath).deleteRecursively()
+            clearPluginPrefs(pluginId)
             emit(PluginEvent.Uninstalled(pluginId))
             record
         }
+    }
+
+    /** Deletes the plugin's namespaced SharedPreferences (`plugin_<id>_*.xml`). */
+    private fun clearPluginPrefs(pluginId: String) {
+        val application = app ?: return
+        val prefsDir = File(application.dataDir, "shared_prefs")
+        if (!prefsDir.isDirectory) return
+        val prefix = "plugin_${pluginId}_"
+        prefsDir.listFiles()
+            ?.filter { it.name.startsWith(prefix) && it.name.endsWith(".xml") }
+            ?.forEach { it.delete() }
     }
 
     /**

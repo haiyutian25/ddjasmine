@@ -1,8 +1,13 @@
 package com.lhzkml.jasmine.core.plugin
 
 import android.app.Application
+import android.content.Context
+import android.content.SharedPreferences
 import android.content.res.Resources
 import androidx.compose.runtime.Composable
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
 /**
  * Runtime context handed to a plugin's [PluginEntry.onLoad]. Resources are
@@ -16,7 +21,27 @@ class PluginContext(
     val pluginId: String,
     val pluginDir: String,
     val resources: Resources,
-)
+) {
+    private val dir: File get() = File(pluginDir)
+
+    /**
+     * 插件专属 SharedPreferences。命名空间以 `plugin_<pluginId>_` 隔离，
+     * 不与宿主或其他插件冲突；卸载时由框架统一清理。
+     */
+    fun prefs(name: String = "default"): SharedPreferences =
+        application.getSharedPreferences("plugin_${pluginId}_$name", Context.MODE_PRIVATE)
+
+    /** 插件私有数据目录（等价于 pluginDir，确保已创建）。 */
+    fun filesDir(): File = dir.apply { mkdirs() }
+
+    /** 打开插件私有文件输出流。 */
+    fun openFileOutput(name: String, mode: Int = Context.MODE_PRIVATE): FileOutputStream =
+        FileOutputStream(File(dir.apply { mkdirs() }, name))
+
+    /** 打开插件私有文件输入流。 */
+    fun openFileInput(name: String): FileInputStream =
+        FileInputStream(File(dir, name))
+}
 
 /**
  * Typed handle for cross-plugin service lookup. Plugins publish

@@ -2,6 +2,7 @@ package com.lhzkml.jasmine.core.plugin.proxy
 
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.pm.ProviderInfo
 import android.database.Cursor
 import android.net.Uri
 import android.os.Binder
@@ -69,8 +70,17 @@ open class HostProvider : ContentProvider() {
         }
 
         val provider = instances.getOrPut(className) {
-            PluginHost.instantiateComponent(pluginId, className) as? ContentProvider
+            val p = PluginHost.instantiateComponent(pluginId, className) as? ContentProvider
                 ?: throw IllegalStateException("$className 不是 ContentProvider")
+            // 补 attachInfo + onCreate：让插件 Provider 的 getContext() 可用并走正常
+            // 生命周期（否则直接 newInstance 会导致 getContext() 为 null、onCreate 不执行）。
+            val info = ProviderInfo().apply {
+                authority = pluginAuthority
+                applicationInfo = context?.applicationInfo
+            }
+            p.attachInfo(context, info)
+            p.onCreate()
+            p
         }
         val originalPath = uri.pathSegments.drop(1).joinToString("/")
         val rewritten = uri.buildUpon()

@@ -135,4 +135,23 @@ open class HostActivity : ComponentActivity() {
 
     override fun onTouchEvent(event: MotionEvent?): Boolean =
         pluginActivity?.onTouchEvent(event) == true || super.onTouchEvent(event)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        pluginActivity?.onNewIntent(intent)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        pluginActivity?.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        pluginActivity?.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
 }

@@ -1,10 +1,12 @@
 package com.lhzkml.jasmine.core.plugin.crash
 
+import com.lhzkml.jasmine.core.plugin.PluginEvent
 import com.lhzkml.jasmine.core.plugin.PluginHost
 import com.lhzkml.jasmine.core.plugin.internal.PluginLinkException
 import com.lhzkml.jasmine.core.plugin.rust.FfiCrashKind
 import com.lhzkml.jasmine.core.plugin.rust.FfiDependencyFailure
 import com.lhzkml.jasmine.core.plugin.rust.FfiExceptionFrame
+import java.io.File
 
 /** The crash hook's decision, surfaced to the host for policy (disable + restart). */
 data class PluginCrash(
@@ -35,13 +37,30 @@ object CrashHook {
      * Installs the hook — call before the runtime initializes, so plugin
      * failures during framework load are covered; attribution simply
      * reports nothing until the core is up.
+     *
+     * [crashMarkerDir]（可选）启用崩溃熔断：归因到插件后同步写入
+     * `<pluginId>.crash` 标记，宿主下次启动据此跳过该插件，避免反复崩溃。
      */
-    fun install(callback: PluginCrashCallback) {
+    fun install(callback: PluginCrashCallback, crashMarkerDir: File? = null) {
         previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             val verdict = classify(throwable)
             if (verdict != null) {
                 runCatching { callback.onPluginCrash(verdict) }
+                // 归因到插件的崩溃也走统一事件通道，供宿主做禁用/熔断/上报。
+                PluginHost.emit(
+                    PluginEvent.Crash(
+                        pluginId = verdict.culpritPluginId ?: "",
+                        kind = verdict.kind.name,
+                        blameAttributed = verdict.culpritPluginId != null,
+                    ),
+                )
+                // 崩溃熔断：同步写标记（崩溃 handler 里只做最轻量、无锁的写入）。
+                verdict.culpritPluginId?.let { id ->
+                    crashMarkerDir?.let { dir ->
+                        runCatching { File(dir, "$id.crash").createNewFile() }
+                    }
+                }
             }
             previous?.uncaughtException(thread, throwable)
                 ?: kotlin.system.exitProcess(10)
