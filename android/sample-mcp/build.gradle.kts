@@ -62,16 +62,23 @@ kotlin {
 // Packaging: plugin package-id 0x84 (slot 4, host keeps 0x7f).
 pluginPack {
     packageIdSlot.set(4)
+    // 宿主 core-agent 已改用 Ktor（OkHttp engine），Ktor 及其底层
+    // OkHttp/Okio 都在宿主 APK。这里把 MCP SDK 传递进来的 Ktor/OkHttp/Okio
+    // 从插件 DEX 排除，运行时从宿主解析，避免插件重复打包 Ktor。
+    excludeGroups.add("io.ktor")
+    excludeGroups.add("com.squareup.okhttp3")
+    excludeGroups.add("com.squareup.okio")
 }
 
 dependencies {
     compileOnly(project(":core-plugin"))
     compileOnly(libs.androidx.activity)
 
-    // MCP 官方 SDK + Ktor：插件自带，打进插件 DEX（宿主未提供）。
+    // MCP 官方 SDK 打进插件 DEX；Ktor 由宿主 core-agent 提供，compileOnly
+    // 声明从宿主解析（excludeGroups 进一步阻止其打进插件 DEX）。
     implementation(libs.mcp.sdk.client)
-    implementation(libs.ktor.client.core)
-    implementation(libs.ktor.client.okhttp)
+    compileOnly(libs.ktor.client.core)
+    compileOnly(libs.ktor.client.okhttp)
 
     // 插件 UI 在运行时经父 ClassLoader 从宿主解析，故 compileOnly
     val composeBom = platform(libs.androidx.compose.bom)
@@ -79,6 +86,7 @@ dependencies {
     compileOnly(libs.androidx.compose.ui)
     compileOnly(libs.androidx.compose.foundation)
     compileOnly(libs.androidx.compose.material3)
+    compileOnly(libs.androidx.compose.material.icons.core)
 
     ksp(project(":core-plugin-ksp"))
 }

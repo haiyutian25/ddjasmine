@@ -1,10 +1,13 @@
 package jasmine.sample.mcp
 
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.ClientOptions
+import io.modelcontextprotocol.kotlin.sdk.client.SseClientTransport
 import io.modelcontextprotocol.kotlin.sdk.client.StdioClientTransport
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpClientTransport
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
@@ -51,24 +54,35 @@ class McpClientManager {
                 clientInfo = Implementation(name = "jasmine-mcp-plugin", version = "1.0.0"),
                 options = ClientOptions(),
             )
-            val transport = when {
-                config.isHttp -> {
-                    val http = HttpClient { install(SSE) }
+            val requestHeaders: HttpRequestBuilder.() -> Unit = {
+                config.headers.forEach { (key, value) -> header(key, value) }
+                config.accessToken?.takeIf { it.isNotBlank() }?.let {
+                    header("Authorization", "Bearer $it")
+                }
+            }
+
+            val transport = when (config.transportType) {
+                TransportType.STREAMABLE_HTTP -> {
+                    val http = HttpClient(OkHttp) { install(SSE) }
                     StreamableHttpClientTransport(
                         client = http,
-                        url = config.url!!,
-                        requestBuilder = {
-                            config.headers.forEach { (key, value) -> header(key, value) }
-                            config.accessToken?.takeIf { it.isNotBlank() }?.let {
-                                header("Authorization", "Bearer $it")
-                            }
-                        },
+                        url = requireNotNull(config.url) { "缺少 url" },
+                        requestBuilder = requestHeaders,
                     )
                 }
 
-                config.isStdio -> {
+                TransportType.SSE -> {
+                    val http = HttpClient(OkHttp) { install(SSE) }
+                    SseClientTransport(
+                        client = http,
+                        urlString = requireNotNull(config.url) { "缺少 url" },
+                        requestBuilder = requestHeaders,
+                    )
+                }
+
+                TransportType.STDIO -> {
                     val process = ProcessBuilder(buildList {
-                        add(config.command!!)
+                        add(requireNotNull(config.command) { "缺少 command" })
                         addAll(config.args)
                     })
                         .apply { environment().putAll(config.env) }
@@ -80,8 +94,6 @@ class McpClientManager {
                         error = process.errorStream.asSource().buffered(),
                     )
                 }
-
-                else -> throw IllegalArgumentException("server 配置缺少 url 或 command")
             }
             client.connect(transport)
             clients[config.name] = client

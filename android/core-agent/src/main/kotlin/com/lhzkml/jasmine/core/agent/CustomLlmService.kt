@@ -1,7 +1,20 @@
 package com.lhzkml.jasmine.core.agent
 
-import java.io.IOException
-import java.util.concurrent.TimeUnit
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.preparePost
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -16,10 +29,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 /** API wire protocol used by one user-defined provider connection. */
 enum class ProviderProtocol(val endpoint: String) {
@@ -72,10 +81,13 @@ private data class StreamPiece(val kind: StreamPieceKind, val text: String)
  * Before dispatch, history is fitted to `contextLength - maxOutputTokens`
  * using the same fixed density as the Rust meter (4 characters/token). The
  * newest message is always retained; older messages drop from the head.
+ *
+ * HTTP transport is Ktor (OkHttp engine) so the host shares the same client
+ * stack — and OkHttp version — as plugins embedding the MCP Kotlin SDK.
  */
 class CustomLlmService(
     private val config: CustomProviderConfig,
-    client: OkHttpClient = defaultClient(),
+    client: HttpClient = defaultClient(),
     /** Receives every raw line the provider sends, verbatim (diagnostics). */
     private val rawSink: (String) -> Unit = {},
 ) : LlmService {
@@ -85,11 +97,11 @@ class CustomLlmService(
 
     override suspend fun complete(request: LlmRequest): LlmResponse = withContext(Dispatchers.IO) {
         val body = requestBody(request.messages, stream = false)
-        val payload = execute(
-            authenticated(Request.Builder().url(protocolUrl()).post(body.toRequestBody(JSON_MEDIA_TYPE))).build()
-        ).use { response ->
-            response.body?.string() ?: throw LlmProviderException("供应商返回了空响应")
-        }
+        val payload = client.post(protocolUrl()) {
+            applyAuth(this)
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }.bodyAsText()
         rawSink(payload)
         val root = parseObject(payload, "供应商响应无法解析")
         val content = when (config.protocol) {
@@ -106,17 +118,23 @@ class CustomLlmService(
         onReasoning: suspend (String) -> Unit,
     ): LlmResponse = withContext(Dispatchers.IO) {
         val body = requestBody(request.messages, stream = true)
-        val response = execute(
-            authenticated(Request.Builder().url(protocolUrl()).post(body.toRequestBody(JSON_MEDIA_TYPE))).build()
-        )
-        response.use { raw ->
-            val source = raw.body?.source() ?: throw LlmProviderException("供应商返回了空响应")
+        client.preparePost(protocolUrl()) {
+            applyAuth(this)
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }.execute { response ->
+            if (!response.status.isSuccess()) {
+                val code = response.status.value
+                val errorBody = sanitize(response.bodyAsText().take(300))
+                throw LlmProviderException("供应商 HTTP $code：$errorBody")
+            }
+            val channel = response.bodyAsChannel()
             val content = StringBuilder()
             val reasoning = StringBuilder()
             var eventName = ""
             var sawChunk = false
             while (true) {
-                val line = source.readUtf8Line() ?: break
+                val line = channel.readUTF8Line() ?: break
                 rawSink(line)
                 val trimmed = line.trim()
                 if (trimmed.isEmpty() || trimmed.startsWith(":")) continue
@@ -208,10 +226,9 @@ class CustomLlmService(
 
     /** Lists model ids from the conventional `GET /models` endpoint. */
     suspend fun listModels(): List<String> = withContext(Dispatchers.IO) {
-        val http = authenticated(Request.Builder().url(modelsUrl()).get()).build()
-        val payload = execute(http).use { response ->
-            response.body?.string() ?: throw LlmProviderException("供应商返回了空响应")
-        }
+        val payload = client.get(modelsUrl()) {
+            applyAuth(this)
+        }.bodyAsText()
         val root = parseObject(payload, "模型列表无法解析")
         root["data"]?.jsonArray.orEmpty().mapNotNull { item ->
             item.jsonObject["id"]?.jsonPrimitive?.contentOrNull
@@ -286,21 +303,8 @@ class CustomLlmService(
         return root
     }
 
-    private fun authenticated(builder: Request.Builder): Request.Builder =
-        if (config.apiKey.isBlank()) builder else builder.header("Authorization", "Bearer ${config.apiKey}")
-
-    private fun execute(request: Request): okhttp3.Response {
-        val response = try {
-            client.newCall(request).execute()
-        } catch (e: IOException) {
-            throw LlmProviderException("网络错误：${sanitize(e.message)}", e)
-        }
-        if (!response.isSuccessful) {
-            val code = response.code
-            val body = response.use { it.body?.string().orEmpty() }.take(300)
-            throw LlmProviderException("供应商 HTTP $code：${sanitize(body)}")
-        }
-        return response
+    private fun applyAuth(builder: HttpRequestBuilder) {
+        if (config.apiKey.isNotBlank()) builder.header("Authorization", "Bearer ${config.apiKey}")
     }
 
     private fun parseObject(payload: String, message: String): JsonObject = try {
@@ -316,12 +320,13 @@ class CustomLlmService(
     }
 
     companion object {
-        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
-
-        fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .build()
+        fun defaultClient(): HttpClient = HttpClient(OkHttp) {
+            install(HttpTimeout) {
+                connectTimeoutMillis = 15_000
+                requestTimeoutMillis = 120_000
+                socketTimeoutMillis = 120_000
+            }
+        }
     }
 }
 

@@ -17,7 +17,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -150,6 +155,13 @@ fun McpMainScreen(repository: McpRepository, clientManager: McpClientManager) {
                 repository.upsert(config)
                 refresh()
                 screen = Screen.List
+                // 保存后若启用且配置有效，自动连接，让用户立即看到连接状态与工具
+                if (config.enabled && config.isValid) {
+                    run {
+                        clientManager.connect(config)
+                        connected = connected + config.name
+                    }
+                }
             },
             onCancel = { screen = Screen.List },
         )
@@ -202,7 +214,7 @@ private fun ServerListScreen(
                     }) { Text("导出") }
                     TextButton(onClick = { importOpen = true }) { Text("导入") }
                     IconButton(onClick = onAdd) {
-                        Text("＋", style = MaterialTheme.typography.titleLarge)
+                        Icon(Icons.Filled.Add, contentDescription = "添加")
                     }
                 },
             )
@@ -303,10 +315,10 @@ private fun ServerCard(
                     Text(server.name, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = when {
-                            server.isHttp -> "HTTP"
-                            server.isStdio -> "STDIO"
-                            else -> "无效"
+                        text = when (server.transportType) {
+                            TransportType.STREAMABLE_HTTP -> "Streamable HTTP"
+                            TransportType.SSE -> "SSE"
+                            TransportType.STDIO -> "STDIO"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
@@ -322,20 +334,23 @@ private fun ServerCard(
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = when {
-                        server.isHttp -> server.url.orEmpty()
-                        server.isStdio ->
+                    text = when (server.transportType) {
+                        TransportType.STDIO ->
                             listOfNotNull(server.command, server.args.joinToString(" ").ifBlank { null })
                                 .joinToString(" ")
 
-                        else -> "未配置 url 或 command"
+                        else -> server.url.orEmpty()
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             Switch(checked = server.enabled, onCheckedChange = onToggleEnabled)
-            IconButton(onClick = onEdit) { Text("✎") }
-            IconButton(onClick = onDelete) { Text("🗑") }
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Filled.Edit, contentDescription = "编辑")
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, contentDescription = "删除")
+            }
         }
     }
 }
@@ -348,7 +363,9 @@ private fun ServerEditScreen(
     onCancel: () -> Unit,
 ) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
-    var isHttp by remember { mutableStateOf(initial?.isHttp ?: true) }
+    var transportType by remember {
+        mutableStateOf(initial?.transportType ?: TransportType.STREAMABLE_HTTP)
+    }
     var url by remember { mutableStateOf(initial?.url ?: "") }
     var command by remember { mutableStateOf(initial?.command ?: "") }
     var args by remember { mutableStateOf(initial?.args?.joinToString(" ") ?: "") }
@@ -379,11 +396,24 @@ private fun ServerEditScreen(
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = isHttp, onClick = { isHttp = true }, label = { Text("HTTP 远程") })
-                FilterChip(selected = !isHttp, onClick = { isHttp = false }, label = { Text("STDIO 本地") })
+                FilterChip(
+                    selected = transportType == TransportType.STREAMABLE_HTTP,
+                    onClick = { transportType = TransportType.STREAMABLE_HTTP },
+                    label = { Text("Streamable HTTP") },
+                )
+                FilterChip(
+                    selected = transportType == TransportType.SSE,
+                    onClick = { transportType = TransportType.SSE },
+                    label = { Text("SSE") },
+                )
+                FilterChip(
+                    selected = transportType == TransportType.STDIO,
+                    onClick = { transportType = TransportType.STDIO },
+                    label = { Text("STDIO") },
+                )
             }
 
-            if (isHttp) {
+            if (transportType != TransportType.STDIO) {
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
@@ -447,8 +477,8 @@ private fun ServerEditScreen(
                         onSave(
                             McpServerConfig(
                                 name = name.trim(),
-                                url = if (isHttp) url.trim().ifBlank { null } else null,
-                                command = if (!isHttp) command.trim().ifBlank { null } else null,
+                                url = if (transportType != TransportType.STDIO) url.trim().ifBlank { null } else null,
+                                command = if (transportType == TransportType.STDIO) command.trim().ifBlank { null } else null,
                                 args = args.trim().split(Regex("\\s+")).filter { it.isNotEmpty() },
                                 env = env.lines().mapNotNull { line ->
                                     val i = line.indexOf('=')
@@ -460,6 +490,7 @@ private fun ServerEditScreen(
                                 }.toMap(),
                                 accessToken = accessTokenText.trim().ifBlank { null },
                                 enabled = enabled,
+                                transportType = transportType,
                             ),
                         )
                     },
@@ -496,6 +527,7 @@ private fun ServerDetailScreen(
     var promptContent by remember { mutableStateOf<String?>(null) }
     var resourceTarget by remember { mutableStateOf<Resource?>(null) }
     var resourceContent by remember { mutableStateOf<String?>(null) }
+    var toolsError by remember { mutableStateOf<String?>(null) }
 
     fun run(block: suspend () -> Unit) {
         scope.launch {
@@ -522,7 +554,13 @@ private fun ServerDetailScreen(
             loading = false
             return@launch
         }
-        tools = try { clientManager.listTools(name) } catch (_: Throwable) { emptyList() }
+        toolsError = null
+        tools = try {
+            clientManager.listTools(name)
+        } catch (t: Throwable) {
+            toolsError = "工具加载失败：${t.message}"
+            emptyList()
+        }
         prompts = try { clientManager.listPrompts(name) } catch (_: Throwable) { emptyList() }
         resources = try { clientManager.listResources(name) } catch (_: Throwable) { emptyList() }
         loading = false
@@ -530,7 +568,13 @@ private fun ServerDetailScreen(
 
     fun refreshAll() = scope.launch {
         loading = true
-        tools = try { clientManager.listTools(name) } catch (_: Throwable) { emptyList() }
+        toolsError = null
+        tools = try {
+            clientManager.listTools(name)
+        } catch (t: Throwable) {
+            toolsError = "工具加载失败：${t.message}"
+            emptyList()
+        }
         prompts = try { clientManager.listPrompts(name) } catch (_: Throwable) { emptyList() }
         resources = try { clientManager.listResources(name) } catch (_: Throwable) { emptyList() }
         loading = false
@@ -559,12 +603,19 @@ private fun ServerDetailScreen(
                 return@Column
             }
             Text(
-                when {
-                    config.isHttp -> "HTTP：${config.url}"
-                    config.isStdio -> "STDIO：${config.command} ${config.args.joinToString(" ")}"
-                    else -> "配置无效"
+                when (config.transportType) {
+                    TransportType.STREAMABLE_HTTP -> "Streamable HTTP：${config.url}"
+                    TransportType.SSE -> "SSE：${config.url}"
+                    TransportType.STDIO -> "STDIO：${config.command} ${config.args.joinToString(" ")}"
                 },
                 style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "连接状态：${if (connected) "已连接" else "未连接"}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (connected) MaterialTheme.colorScheme.tertiary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(12.dp))
 
@@ -605,7 +656,7 @@ private fun ServerDetailScreen(
             Spacer(Modifier.height(12.dp))
 
             when (tab) {
-                0 -> ToolList(tools = tools, connected = connected, onCall = { tool ->
+                0 -> ToolList(tools = tools, connected = connected, toolsError = toolsError, onCall = { tool ->
                     callTarget = tool
                     callResult = null
                     callArgs = "{}"
@@ -736,7 +787,11 @@ private fun ServerDetailScreen(
 }
 
 @Composable
-private fun ToolList(tools: List<Tool>, connected: Boolean, onCall: (Tool) -> Unit) {
+private fun ToolList(tools: List<Tool>, connected: Boolean, toolsError: String?, onCall: (Tool) -> Unit) {
+    if (toolsError != null) {
+        Text(toolsError, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+        return
+    }
     if (tools.isEmpty()) {
         Text(if (connected) "暂无工具" else "连接后列出工具", style = MaterialTheme.typography.bodyMedium)
         return
