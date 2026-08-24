@@ -126,9 +126,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
-    // 授权账本持久化复用宿主的 Room（core-database），不再用 JSON 文件自存。
+    // 授权账本持久化复用宿主的 Room（core-database 的 api 暴露 Room），不再用 JSON 文件自存。
     implementation(project(":core-database"))
-    implementation(libs.androidx.room.runtime)
 
     // 插件 UI 契约：@Composable 注解（api 使插件 compileOnly 时可见）
     api(platform(libs.androidx.compose.bom))

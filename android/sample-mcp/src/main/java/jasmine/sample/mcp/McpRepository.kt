@@ -1,66 +1,36 @@
 package jasmine.sample.mcp
 
+import com.lhzkml.jasmine.core.database.McpServerDao
+import kotlinx.coroutines.flow.first
 import org.json.JSONObject
-import java.io.File
 
 /**
- * `servers.json` 持久化仓库，存于插件私有目录。
- *
- * 文件格式与 Claude Desktop 兼容：
- * ```
- * { "mcpServers": { "<name>": { "url": "...", "enabled": true } } }
- * ```
- * 采用临时文件 + 原子重命名，避免写一半损坏。
+ * MCP server 配置仓库：持久化统一走宿主的 Room（core-database 的 McpServerDao），
+ * 不再用 `servers.json` 文件。仍保留 `importJson`/`exportJson` 以兼容 Claude
+ * Desktop 的 JSON 格式导入导出。
  */
-class McpRepository(private val configFile: File) {
+class McpRepository(private val dao: McpServerDao) {
 
-    fun load(): List<McpServerConfig> {
-        if (!configFile.exists()) return emptyList()
-        val root = try {
-            JSONObject(configFile.readText())
-        } catch (_: Exception) {
-            return emptyList()
-        }
-        val servers = root.optJSONObject("mcpServers") ?: return emptyList()
-        return servers.keys().asSequence().mapNotNull { name ->
-            servers.optJSONObject(name)?.let { McpServerConfig.fromJson(name, it) }
-        }.toList()
+    suspend fun load(): List<McpServerConfig> =
+        dao.getAll().first().map { McpServerConfig.fromEntity(it) }
+
+    suspend fun upsert(config: McpServerConfig) {
+        dao.upsert(config.toEntity())
     }
 
-    fun save(servers: List<McpServerConfig>) {
-        val root = JSONObject()
-        val mcpServers = JSONObject()
-        servers.forEach { mcpServers.put(it.name, it.toJson()) }
-        root.put("mcpServers", mcpServers)
-
-        configFile.parentFile?.mkdirs()
-        val tmp = File(configFile.parentFile, configFile.name + ".tmp")
-        tmp.writeText(root.toString(2))
-        if (configFile.exists()) configFile.delete()
-        if (!tmp.renameTo(configFile)) {
-            tmp.copyTo(configFile, overwrite = true)
-            tmp.delete()
-        }
+    suspend fun remove(name: String) {
+        dao.deleteByName(name)
     }
 
-    fun upsert(config: McpServerConfig) {
-        val list = load().filterNot { it.name == config.name }.toMutableList()
-        list.add(config)
-        save(list)
+    suspend fun setEnabled(name: String, enabled: Boolean) {
+        dao.setEnabled(name, enabled)
     }
 
-    fun remove(name: String) {
-        save(load().filterNot { it.name == name })
-    }
-
-    fun setEnabled(name: String, enabled: Boolean) {
-        save(load().map { if (it.name == name) it.copy(enabled = enabled) else it })
-    }
-
-    fun find(name: String): McpServerConfig? = load().find { it.name == name }
+    suspend fun find(name: String): McpServerConfig? =
+        dao.findByName(name)?.let { McpServerConfig.fromEntity(it) }
 
     /** 从 Claude Desktop 兼容的 JSON 文本批量导入 server（同名覆盖），返回导入数量。 */
-    fun importJson(jsonText: String): Int {
+    suspend fun importJson(jsonText: String): Int {
         val root = try {
             JSONObject(jsonText)
         } catch (_: Exception) {
@@ -68,21 +38,17 @@ class McpRepository(private val configFile: File) {
         }
         val servers = root.optJSONObject("mcpServers") ?: return 0
         var count = 0
-        val current = load().toMutableList()
         servers.keys().forEach { name ->
             servers.optJSONObject(name)?.let { json ->
-                val config = McpServerConfig.fromJson(name, json)
-                current.removeAll { it.name == name }
-                current.add(config)
+                dao.upsert(McpServerConfig.fromJson(name, json).toEntity())
                 count++
             }
         }
-        save(current)
         return count
     }
 
     /** 导出当前配置为 Claude Desktop 兼容的 JSON 文本。 */
-    fun exportJson(): String {
+    suspend fun exportJson(): String {
         val root = JSONObject()
         val mcpServers = JSONObject()
         load().forEach { mcpServers.put(it.name, it.toJson()) }

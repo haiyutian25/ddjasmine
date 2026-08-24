@@ -17,13 +17,13 @@
 package com.lhzkml.jasmine.core.database.di
 
 import android.content.Context
-import androidx.room.Room
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import com.lhzkml.jasmine.core.database.JasmineDatabase
+import com.lhzkml.jasmine.core.database.JasmineDatabaseProvider
 import com.lhzkml.jasmine.core.database.PluginDao
 import javax.inject.Singleton
 
@@ -38,10 +38,6 @@ class DatabaseModule {
     @Provides
     @Singleton
     fun provideJasmineDatabase(@ApplicationContext appContext: Context): JasmineDatabase {
-        return Room.databaseBuilder(
-            appContext,
-            JasmineDatabase::class.java,
-            "Plugin"
-        ).fallbackToDestructiveMigration().build()
+        return JasmineDatabaseProvider.get(appContext)
     }
 }

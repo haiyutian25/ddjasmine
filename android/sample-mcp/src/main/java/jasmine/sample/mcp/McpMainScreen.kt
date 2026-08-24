@@ -109,11 +109,13 @@ private fun ReadResourceResult.toDisplayText(): String {
 fun McpMainScreen(repository: McpRepository, clientManager: McpClientManager) {
     val scope = rememberCoroutineScope()
     var screen by remember { mutableStateOf<Screen>(Screen.List) }
-    var servers by remember { mutableStateOf(repository.load()) }
+    var servers by remember { mutableStateOf<List<McpServerConfig>>(emptyList()) }
     var connected by remember { mutableStateOf(setOf<String>()) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    val refresh: () -> Unit = { servers = repository.load() }
+    suspend fun refresh() { servers = repository.load() }
+
+    LaunchedEffect(Unit) { servers = repository.load() }
 
     fun run(block: suspend () -> Unit) {
         scope.launch {
@@ -151,8 +153,10 @@ fun McpMainScreen(repository: McpRepository, clientManager: McpClientManager) {
                 }
             },
             onToggleEnabled = { name, enabled ->
-                repository.setEnabled(name, enabled)
-                refresh()
+                run {
+                    repository.setEnabled(name, enabled)
+                    refresh()
+                }
                 if (!enabled) {
                     run { clientManager.disconnect(name) }
                     connected = connected - name
@@ -165,9 +169,11 @@ fun McpMainScreen(repository: McpRepository, clientManager: McpClientManager) {
         is Screen.Edit -> ServerEditScreen(
             initial = s.editing,
             onSave = { config ->
-                repository.upsert(config)
-                refresh()
-                screen = Screen.List
+                run {
+                    repository.upsert(config)
+                    refresh()
+                    screen = Screen.List
+                }
                 // 保存后若启用且配置有效，自动连接，让用户立即看到连接状态与工具
                 if (config.enabled && config.isValid) {
                     run {
@@ -179,18 +185,22 @@ fun McpMainScreen(repository: McpRepository, clientManager: McpClientManager) {
             onCancel = { screen = Screen.List },
         )
 
-        is Screen.Detail -> ServerDetailScreen(
-            name = s.name,
-            config = repository.find(s.name),
-            connected = s.name in connected,
-            clientManager = clientManager,
-            onDisconnect = {
-                clientManager.disconnect(s.name)
-                connected = connected - s.name
-            },
-            onPing = { clientManager.ping(s.name) },
-            onBack = { screen = Screen.List },
-        )
+        is Screen.Detail -> {
+            var detailConfig by remember(s.name) { mutableStateOf<McpServerConfig?>(null) }
+            LaunchedEffect(s.name) { detailConfig = repository.find(s.name) }
+            ServerDetailScreen(
+                name = s.name,
+                config = detailConfig,
+                connected = s.name in connected,
+                clientManager = clientManager,
+                onDisconnect = {
+                    clientManager.disconnect(s.name)
+                    connected = connected - s.name
+                },
+                onPing = { clientManager.ping(s.name) },
+                onBack = { screen = Screen.List },
+            )
+        }
     }
 }
 
@@ -204,9 +214,10 @@ private fun ServerListScreen(
     onOpen: (McpServerConfig) -> Unit,
     onDelete: (String) -> Unit,
     onToggleEnabled: (String, Boolean) -> Unit,
-    onImport: (String) -> Int,
-    onExport: () -> String,
+    onImport: suspend (String) -> Unit,
+    onExport: suspend () -> String,
 ) {
+    val scope = rememberCoroutineScope()
     var importOpen by remember { mutableStateOf(false) }
     var exportOpen by remember { mutableStateOf(false) }
     var importText by remember { mutableStateOf("") }
@@ -218,8 +229,10 @@ private fun ServerListScreen(
                 title = { Text("MCP 服务器") },
                 actions = {
                     TextButton(onClick = {
-                        exportText = onExport()
-                        exportOpen = true
+                        scope.launch {
+                            exportText = onExport()
+                            exportOpen = true
+                        }
                     }) { Text("导出") }
                     TextButton(onClick = { importOpen = true }) { Text("导入") }
                     IconButton(onClick = onAdd) {
@@ -274,8 +287,10 @@ private fun ServerListScreen(
             },
             confirmButton = {
                 Button(onClick = {
-                    onImport(importText)
-                    importOpen = false
+                    scope.launch {
+                        onImport(importText)
+                        importOpen = false
+                    }
                 }) { Text("导入") }
             },
             dismissButton = {

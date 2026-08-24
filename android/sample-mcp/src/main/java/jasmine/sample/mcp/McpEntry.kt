@@ -13,7 +13,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.Prompt
 import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
 import io.modelcontextprotocol.kotlin.sdk.types.Resource
 import io.modelcontextprotocol.kotlin.sdk.types.Tool
-import java.io.File
+import com.lhzkml.jasmine.core.database.JasmineDatabaseProvider
 
 /**
  * 跨插件发布的 MCP 服务：宿主或其它插件可通过 [KEY] 消费 MCP 能力。
@@ -87,7 +87,7 @@ class McpEntry : PluginEntry {
     )
 
     override fun onLoad(context: PluginContext) {
-        repository = McpRepository(File(context.pluginDir, "servers.json"))
+        repository = McpRepository(JasmineDatabaseProvider.get(context.application).mcpServerDao())
         clientManager = McpClientManager()
     }
 

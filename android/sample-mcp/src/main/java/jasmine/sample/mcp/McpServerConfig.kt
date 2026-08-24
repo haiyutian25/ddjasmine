@@ -1,5 +1,6 @@
 package jasmine.sample.mcp
 
+import com.lhzkml.jasmine.core.database.McpServerEntity
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -56,6 +57,19 @@ data class McpServerConfig(
         accessToken?.takeIf { it.isNotBlank() }?.let { put("accessToken", it) }
     }
 
+    /** 转 Room 实体（List/Map 字段序列化为 JSON 字符串）。 */
+    fun toEntity(): McpServerEntity = McpServerEntity(
+        name = name,
+        url = url,
+        command = command,
+        argsJson = args.takeIf { it.isNotEmpty() }?.let { JSONArray(it).toString() },
+        envJson = env.takeIf { it.isNotEmpty() }?.let { JSONObject(it).toString() },
+        headersJson = headers.takeIf { it.isNotEmpty() }?.let { JSONObject(it).toString() },
+        accessToken = accessToken,
+        enabled = enabled,
+        transportType = transportType.name,
+    )
+
     companion object {
         fun fromJson(name: String, json: JSONObject): McpServerConfig {
             val args = json.optJSONArray("args")?.let { arr ->
@@ -86,6 +100,40 @@ data class McpServerConfig(
                 accessToken = json.optString("accessToken").takeIf { it.isNotEmpty() },
                 enabled = json.optBoolean("enabled", true),
                 transportType = transportType,
+            )
+        }
+
+        /** 从 Room 实体还原（JSON 字符串反序列化为 List/Map）。 */
+        fun fromEntity(entity: McpServerEntity): McpServerConfig {
+            val args = entity.argsJson?.let { json ->
+                runCatching {
+                    val arr = JSONArray(json)
+                    (0 until arr.length()).map { arr.getString(it) }
+                }.getOrDefault(emptyList())
+            } ?: emptyList()
+            val env = entity.envJson?.let { json ->
+                runCatching {
+                    val obj = JSONObject(json)
+                    obj.keys().asSequence().associateWith { obj.getString(it) }
+                }.getOrDefault(emptyMap())
+            } ?: emptyMap()
+            val headers = entity.headersJson?.let { json ->
+                runCatching {
+                    val obj = JSONObject(json)
+                    obj.keys().asSequence().associateWith { obj.getString(it) }
+                }.getOrDefault(emptyMap())
+            } ?: emptyMap()
+            return McpServerConfig(
+                name = entity.name,
+                url = entity.url,
+                command = entity.command,
+                args = args,
+                env = env,
+                headers = headers,
+                accessToken = entity.accessToken,
+                enabled = entity.enabled,
+                transportType = runCatching { TransportType.valueOf(entity.transportType) }
+                    .getOrDefault(TransportType.STREAMABLE_HTTP),
             )
         }
     }

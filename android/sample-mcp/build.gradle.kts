@@ -72,6 +72,9 @@ dependencies {
     // PluginPackPlugin 会自动识别宿主已提供的依赖（框架 API / Ktor / Compose 等）
     // 并从插件 DEX 去重、运行时直接使用宿主；宿主没有的（MCP SDK）打进 DEX。
     implementation(project(":core-plugin"))
+    // 服务器配置/开关等数据持久化直接用宿主的 Room（core-database，其 api 暴露 Room），
+    // 插件不自己引入 Room、不重复实现持久化。
+    implementation(project(":core-database"))
     implementation(libs.mcp.sdk.client)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)

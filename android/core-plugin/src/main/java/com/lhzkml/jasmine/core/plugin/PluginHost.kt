@@ -8,8 +8,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
-import androidx.room.Room
 import com.lhzkml.jasmine.core.database.JasmineDatabase
+import com.lhzkml.jasmine.core.database.JasmineDatabaseProvider
 import com.lhzkml.jasmine.core.database.PluginGrant
 import com.lhzkml.jasmine.core.plugin.internal.InstallException
 import com.lhzkml.jasmine.core.plugin.internal.InstallExecutor
@@ -253,10 +253,8 @@ object PluginHost {
             executor = install
             lifecycle = lc
             app = application
-            // 授权账本：用 Room 建库并回放持久化授权到 Rust 核心（Rust grants 会话级）。
-            grantDb = Room.databaseBuilder(application, JasmineDatabase::class.java, "Plugin")
-                .fallbackToDestructiveMigration()
-                .build()
+            // 授权账本：复用宿主的 Room 单例并回放持久化授权到 Rust 核心（Rust grants 会话级）。
+            grantDb = JasmineDatabaseProvider.get(application)
             grantDb?.pluginGrantDao()?.grantedEntries()?.forEach { g ->
                 handle.recordGrant(g.pluginId, g.permissionKey, true)
             }

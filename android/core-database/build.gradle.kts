@@ -58,7 +58,9 @@ kotlin {
 
 dependencies {
     // Arch Components
-    implementation(libs.androidx.room.runtime)
+    // room.runtime 用 api 暴露：core-plugin 等框架模块依赖本模块即可传递获得 Room，
+    // 无需各自再引 Room（避免重复）。room.ktx 仅本模块用，保持 implementation。
+    api(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(libs.hilt.android)
