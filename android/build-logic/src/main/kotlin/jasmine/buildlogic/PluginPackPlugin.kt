@@ -168,7 +168,11 @@ abstract class PluginPackagingTask : DefaultTask() {
         check(manifest.exists()) { "AAR 缺少 AndroidManifest.xml" }
 
         // 2. aapt2 compile + link with the partitioned package id
-        val packageId = "0x%02x".format(0x80 + packageIdSlot.get())
+        val slot = packageIdSlot.get()
+        check(slot in 1..127) {
+            "packageIdSlot 必须在 1..127（生成 package-id 0x81..0xFF，避免与宿主 0x7f 及彼此冲突），当前 $slot"
+        }
+        val packageId = "0x%02x".format(0x80 + slot)
         val flatDir = File(workDir, "flat").apply { mkdirs() }
         val resDir = File(extractDir, "res")
         if (resDir.isDirectory && resDir.listFiles()?.isNotEmpty() == true) {

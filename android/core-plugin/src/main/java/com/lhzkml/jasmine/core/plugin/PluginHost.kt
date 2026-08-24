@@ -1,8 +1,10 @@
 package com.lhzkml.jasmine.core.plugin
 
 import android.app.Application
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.lhzkml.jasmine.core.plugin.internal.InstallException
 import com.lhzkml.jasmine.core.plugin.internal.InstallExecutor
 import com.lhzkml.jasmine.core.plugin.internal.LifecycleExecutor
@@ -673,6 +675,42 @@ object PluginHost {
         val record = pluginRecord(pluginId) ?: return false
         return record.capabilities.contains(capability)
     }
+
+    // --- runtime permission (host permission pool) -------------------------
+
+    /** 检查宿主是否已授予某权限（插件运行在宿主进程，权限 = 宿主权限集）。 */
+    fun hasPermission(permission: String): Boolean =
+        app?.let {
+            ContextCompat.checkSelfPermission(it, permission) == PackageManager.PERMISSION_GRANTED
+        } ?: false
+
+    /**
+     * 请求一项运行时权限（宿主替插件弹系统授权对话框）。已在权限池内的权限
+     * 才有效；结果经挂起返回，供插件在 suspend 上下文等待授权。
+     */
+    suspend fun requestPermission(permission: String): Boolean = withContext(Dispatchers.Main) {
+        val application = app ?: return@withContext false
+        if (hasPermission(permission)) return@withContext true
+        val requestCode = nextPermissionRequestCode()
+        val deferred = CompletableDeferred<Boolean>()
+        permissionRequests[requestCode] = deferred
+        val intent = Intent(application, com.lhzkml.jasmine.core.plugin.auth.PermissionRequestActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(com.lhzkml.jasmine.core.plugin.auth.PermissionRequestActivity.EXTRA_PERMISSION, permission)
+            .putExtra(com.lhzkml.jasmine.core.plugin.auth.PermissionRequestActivity.EXTRA_REQUEST_CODE, requestCode)
+        application.startActivity(intent)
+        deferred.await()
+    }
+
+    /** PermissionRequestActivity 回传授权结果。 */
+    internal fun completePermissionRequest(requestCode: Int, granted: Boolean) {
+        permissionRequests.remove(requestCode)?.complete(granted)
+    }
+
+    private val permissionRequests = ConcurrentHashMap<Int, CompletableDeferred<Boolean>>()
+
+    private fun nextPermissionRequestCode(): Int =
+        (System.nanoTime() and 0xFFFF).toInt()
 
     /**
      * 强制能力门控：插件必须已声明该能力，否则抛 [SecurityException]。
