@@ -218,11 +218,25 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Isolated-process host for heavy-native plugins (MNN, Proot):
-             a crash or memory pressure here never drags the host down. -->
+             a crash or memory pressure here never drags the host down.
+             Multiple slots let the host spread heavy plugins across private
+             processes so one crashing plugin doesn't take down its peers. -->
         <service
             android:name=".process.IsolatedPluginProcessService"
             android:exported="false"
             android:process=":plugin_isolated" />
+        <service
+            android:name=".process.IsolatedPluginProcessService2"
+            android:exported="false"
+            android:process=":plugin_isolated_2" />
+        <service
+            android:name=".process.IsolatedPluginProcessService3"
+            android:exported="false"
+            android:process=":plugin_isolated_3" />
+        <service
+            android:name=".process.IsolatedPluginProcessService4"
+            android:exported="false"
+            android:process=":plugin_isolated_4" />
     </application>
 
 </manifest>

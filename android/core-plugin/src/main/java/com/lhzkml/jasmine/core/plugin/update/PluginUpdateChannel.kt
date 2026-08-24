@@ -89,6 +89,25 @@ class PluginUpdateChannel(
         }
     }
 
+    /**
+     * Downloads and installs the latest version, whether or not it is newer
+     * than the installed record — used to fetch a missing dependency.
+     */
+    suspend fun installLatest(pluginId: String): Boolean = withContext(Dispatchers.IO) {
+        val manifest = fetchManifest(pluginId) ?: return@withContext false
+        val latest = manifest.latest ?: return@withContext false
+        val staged = File(application.cacheDir, "dep-$pluginId-${latest.versionCode}.apk")
+        try {
+            download(latest.downloadUrl, staged)
+            PluginHost.installPlugin(staged, expectedSha256 = latest.sha256)
+            true
+        } catch (e: InstallException) {
+            false
+        } finally {
+            staged.delete()
+        }
+    }
+
     private fun get(url: String): String {
         val connection = URI(url).toURL().openConnection() as HttpURLConnection
         return try {

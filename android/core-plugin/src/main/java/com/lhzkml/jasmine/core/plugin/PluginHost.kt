@@ -387,6 +387,24 @@ object PluginHost {
     }
 
     /**
+     * Installs a plugin after first installing any missing declared
+     * dependencies (via the update channel, best effort). Lets the plugin
+     * manager install a plugin whose dependencies aren't bundled yet in one
+     * step instead of failing on a missing dependency.
+     */
+    suspend fun installWithDependencies(apk: File, expectedSha256: String? = null): FfiPluginRecord =
+        withContext(Dispatchers.IO) {
+            val metadata = requireExecutor().readMetadata(apk)
+            val channel = updateChannel()
+            for (dep in metadata.dependencies) {
+                if (pluginRecord(dep) == null && channel != null) {
+                    runCatching { channel.installLatest(dep) }
+                }
+            }
+            installPlugin(apk, expectedSha256 = expectedSha256)
+        }
+
+    /**
      * Installs plugins bundled in the host's `assets/plugins/` directory
      * (the development-mode distribution channel). Packages already
      * installed at the same version and digest are skipped, so calling this

@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
  * On bind it exposes the process-local [PluginProcessBridge.server], through
  * which the plugin publishes cross-process service tokens.
  */
-class IsolatedPluginProcessService : Service() {
+open class IsolatedPluginProcessService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -53,3 +53,12 @@ class IsolatedPluginProcessService : Service() {
         const val EXTRA_PLUGIN_ID = "jasmine.plugin.process.pluginId"
     }
 }
+
+/** 隔离进程槽 2（`:plugin_isolated_2`），供多进程隔离分配。 */
+class IsolatedPluginProcessService2 : IsolatedPluginProcessService()
+
+/** 隔离进程槽 3（`:plugin_isolated_3`），供多进程隔离分配。 */
+class IsolatedPluginProcessService3 : IsolatedPluginProcessService()
+
+/** 隔离进程槽 4（`:plugin_isolated_4`），供多进程隔离分配。 */
+class IsolatedPluginProcessService4 : IsolatedPluginProcessService()

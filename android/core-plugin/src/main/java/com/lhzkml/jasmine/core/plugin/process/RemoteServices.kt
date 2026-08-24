@@ -43,14 +43,17 @@ object RemoteServices {
      */
     fun resolve(key: RemoteServiceKey): IBinder? {
         PluginProcessBridge.local.resolve(key.name)?.let { return it }
-        return ProcessIsolationManager.bridge()?.resolve(key.name)
+        for (bridge in ProcessIsolationManager.bridges()) {
+            bridge.resolve(key.name)?.let { return it }
+        }
+        return null
     }
 
-    /** Names visible through the current process's directory + bridge. */
+    /** Names visible through the current process's directory + all slot bridges. */
     fun names(): List<String> {
         val seen = linkedSetOf<String>()
         seen += PluginProcessBridge.local.names()
-        ProcessIsolationManager.bridge()?.names()?.let { seen += it }
+        ProcessIsolationManager.bridges().forEach { seen += it.names() }
         return seen.toList()
     }
 }
