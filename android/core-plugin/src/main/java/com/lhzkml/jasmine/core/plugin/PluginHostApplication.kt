@@ -66,4 +66,14 @@ open class PluginHostApplication : Application() {
             }
         }
     }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        PluginHost.notifyLowMemory()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        PluginHost.notifyTrimMemory(level)
+    }
 }

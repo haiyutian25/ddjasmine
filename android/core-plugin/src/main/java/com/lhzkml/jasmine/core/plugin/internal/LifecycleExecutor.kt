@@ -17,6 +17,7 @@ internal class LoadedPlugin(
     val classLoader: PluginClassLoader,
     val entry: PluginEntry,
     val resources: android.content.res.Resources,
+    val app: android.app.Application? = null,
 ) {
     /** Releases native resource tables (API 30+ close) on unload. */
     fun release() {
@@ -43,6 +44,7 @@ internal class LifecycleExecutor(
     private val libDir: (String) -> File,
     private val readDependencies: (String) -> List<String> = { emptyList() },
     private val readUiEntryClass: (String) -> String? = { null },
+    private val readApplicationClass: (String) -> String? = { null },
     var failureCallback: LoadFailureCallback? = null,
 ) {
     private val loaded = ConcurrentHashMap<String, LoadedPlugin>()
@@ -119,6 +121,12 @@ internal class LifecycleExecutor(
         )
         try {
             val entry = instantiateEntry(classLoader, effectiveEntry, pluginId)
+            // 实例化插件 Application（仅主入口；UI 入口不实例化）。
+            val pluginApp = if (!uiOnly) {
+                instantiatePluginApplication(classLoader, readApplicationClass(pluginId), pluginId)
+            } else {
+                null
+            }
             val resources = PluginResourcesLoader.load(
                 application,
                 payloadFile(pluginId).absolutePath,
@@ -131,7 +139,7 @@ internal class LifecycleExecutor(
             )
             entry.onLoad(context)
             if (!uiOnly) entry.onNativeReady(context)
-            loaded[pluginId] = LoadedPlugin(record, classLoader, entry, resources)
+            loaded[pluginId] = LoadedPlugin(record, classLoader, entry, resources, pluginApp)
             serviceTables[pluginId] = entry.services
             // UI 入口不注册 receivers/providers（这些组件属于主入口所在进程）。
             staticActions[pluginId] = if (uiOnly) emptySet() else registerComponents(record)
@@ -201,6 +209,43 @@ internal class LifecycleExecutor(
             ?: throw IllegalStateException(
                 "入口类 [$entryClass] 未实现 PluginEntry（插件 $pluginId）",
             )
+    }
+
+    /**
+     * Instantiates a plugin's declared Application (reflective `attach` with
+     * the host Application as base context) and calls `onCreate`. Failures are
+     * reported but never fail the load.
+     */
+    private fun instantiatePluginApplication(
+        classLoader: PluginClassLoader,
+        applicationClass: String?,
+        pluginId: String,
+    ): android.app.Application? {
+        if (applicationClass.isNullOrBlank()) return null
+        return try {
+            val clazz = classLoader.loadClass(applicationClass)
+            val app = clazz.getDeclaredConstructor().newInstance() as? android.app.Application
+                ?: return null
+            val attach = android.app.Application::class.java
+                .getDeclaredMethod("attach", android.content.Context::class.java)
+            attach.isAccessible = true
+            attach.invoke(app, application)
+            app.onCreate()
+            app
+        } catch (e: Throwable) {
+            failureCallback?.onFailure(pluginId, "application", e)
+            null
+        }
+    }
+
+    /** Forwards low-memory to every loaded plugin Application. */
+    fun notifyLowMemory() {
+        loaded.values.forEach { it.app?.onLowMemory() }
+    }
+
+    /** Forwards trim-memory to every loaded plugin Application. */
+    fun notifyTrimMemory(level: Int) {
+        loaded.values.forEach { it.app?.onTrimMemory(level) }
     }
 
     private fun registerComponents(record: FfiPluginRecord): Set<String> {

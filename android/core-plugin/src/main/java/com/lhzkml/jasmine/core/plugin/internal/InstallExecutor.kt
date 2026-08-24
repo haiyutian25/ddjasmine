@@ -43,6 +43,7 @@ internal class InstallExecutor(private val context: Context) {
         const val PERMISSIONS_NAME = "permissions"
         const val DEPENDENCIES_NAME = "dependencies"
         const val UI_ENTRY_NAME = "ui_entry"
+        const val APP_ENTRY_NAME = "app_entry"
     }
 
     class Metadata(
@@ -53,6 +54,7 @@ internal class InstallExecutor(private val context: Context) {
         val versionName: String,
         val entryClass: String,
         val uiEntryClass: String?,
+        val applicationClass: String?,
         val description: String,
         val capabilities: List<String>,
         val isolated: Boolean,
@@ -103,6 +105,8 @@ internal class InstallExecutor(private val context: Context) {
             versionName = info.versionName.orEmpty(),
             entryClass = entryClass,
             uiEntryClass = meta.getString(META_UI_ENTRY_CLASS),
+            applicationClass = appInfo.className
+                ?.takeIf { it.isNotBlank() && it != "android.app.Application" },
             description = meta.getString(META_DESCRIPTION).orEmpty(),
             capabilities = capabilities,
             isolated = isolated,
@@ -345,6 +349,23 @@ internal class InstallExecutor(private val context: Context) {
     /** Reads the optional UI-side entry class, or null. */
     fun readUiEntryClass(pluginId: String): String? {
         val file = File(pluginDir(pluginId), UI_ENTRY_NAME)
+        if (!file.exists()) return null
+        return file.readText().trim().takeIf { it.isNotEmpty() }
+    }
+
+    /** Writes the optional plugin Application class name. */
+    fun writeApplicationClass(pluginId: String, applicationClass: String?) {
+        val file = File(pluginDir(pluginId), APP_ENTRY_NAME)
+        if (applicationClass.isNullOrBlank()) {
+            file.delete()
+        } else {
+            file.writeText(applicationClass)
+        }
+    }
+
+    /** Reads the optional plugin Application class name, or null. */
+    fun readApplicationClass(pluginId: String): String? {
+        val file = File(pluginDir(pluginId), APP_ENTRY_NAME)
         if (!file.exists()) return null
         return file.readText().trim().takeIf { it.isNotEmpty() }
     }

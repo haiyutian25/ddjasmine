@@ -250,6 +250,7 @@ object PluginHost {
                 libDir = install::libDir,
                 readDependencies = install::readDependencies,
                 readUiEntryClass = install::readUiEntryClass,
+                readApplicationClass = install::readApplicationClass,
                 failureCallback = loadFailureCallback,
             )
             lc.onChange = { refreshMenuEntries(lc) }
@@ -362,6 +363,7 @@ object PluginHost {
             install.writePermissions(metadata.packageName, permissions)
             install.writeDependencies(metadata.packageName, metadata.dependencies)
             install.writeUiEntryClass(metadata.packageName, metadata.uiEntryClass)
+            install.writeApplicationClass(metadata.packageName, metadata.applicationClass)
             val record = install.buildRecord(
                 metadata, request.signatureDigests, packageSha256, classes, receivers, providers,
                 capabilities,
@@ -566,6 +568,16 @@ object PluginHost {
     fun isLoaded(pluginId: String): Boolean = lifecycle?.isLoaded(pluginId) == true
 
     fun loadedPluginIds(): List<String> = lifecycle?.loadedIds() ?: emptyList()
+
+    /** Forwards host low-memory to every loaded plugin Application. */
+    fun notifyLowMemory() {
+        lifecycle?.notifyLowMemory()
+    }
+
+    /** Forwards host trim-memory to every loaded plugin Application. */
+    fun notifyTrimMemory(level: Int) {
+        lifecycle?.notifyTrimMemory(level)
+    }
 
     fun entryOf(pluginId: String): PluginEntry? = lifecycle?.entryOf(pluginId)
 
