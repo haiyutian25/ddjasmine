@@ -16,6 +16,9 @@ enum class PluginLaunchMode {
     /** `launchMode="singleTask"` — one instance as the task root. */
     SingleTask,
 
+    /** `launchMode="singleInstance"` — its own task, no other activities. */
+    SingleInstance,
+
     /** Transparent/no-title theme — for dialog-style plugin activities. */
     Transparent,
 }
@@ -26,6 +29,9 @@ open class HostActivitySingleTop : HostActivity()
 /** `singleTask` slot. */
 open class HostActivitySingleTask : HostActivity()
 
+/** `singleInstance` slot. */
+open class HostActivitySingleInstance : HostActivity()
+
 /** Transparent theme slot. */
 open class HostActivityTransparent : HostActivity()
 
@@ -34,5 +40,6 @@ internal fun PluginLaunchMode.proxyClass(): Class<out HostActivity> = when (this
     PluginLaunchMode.Standard -> HostActivity::class.java
     PluginLaunchMode.SingleTop -> HostActivitySingleTop::class.java
     PluginLaunchMode.SingleTask -> HostActivitySingleTask::class.java
+    PluginLaunchMode.SingleInstance -> HostActivitySingleInstance::class.java
     PluginLaunchMode.Transparent -> HostActivityTransparent::class.java
 }

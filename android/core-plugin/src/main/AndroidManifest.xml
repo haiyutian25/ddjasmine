@@ -22,6 +22,10 @@
             android:exported="false"
             android:launchMode="singleTask" />
         <activity
+            android:name=".proxy.HostActivitySingleInstance"
+            android:exported="false"
+            android:launchMode="singleInstance" />
+        <activity
             android:name=".proxy.HostActivityTransparent"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
