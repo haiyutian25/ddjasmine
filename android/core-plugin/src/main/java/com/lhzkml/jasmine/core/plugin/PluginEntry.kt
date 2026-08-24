@@ -2,7 +2,6 @@ package com.lhzkml.jasmine.core.plugin
 
 import android.app.Application
 import android.content.Context
-import android.content.SharedPreferences
 import android.content.res.Resources
 import androidx.compose.runtime.Composable
 import java.io.File
@@ -24,15 +23,15 @@ class PluginContext(
 ) {
     private val dir: File get() = File(pluginDir)
 
-    /**
-     * 插件专属 SharedPreferences。命名空间以 `plugin_<pluginId>_` 隔离，
-     * 不与宿主或其他插件冲突；卸载时由框架统一清理。
-     */
-    fun prefs(name: String = "default"): SharedPreferences =
-        application.getSharedPreferences("plugin_${pluginId}_$name", Context.MODE_PRIVATE)
-
     /** 插件私有数据目录（等价于 pluginDir，确保已创建）。 */
     fun filesDir(): File = dir.apply { mkdirs() }
+
+    /**
+     * 插件级 Room 数据库目录。持久化统一用宿主已有的 Room（依赖经方案 A 自动
+     * 去重复用宿主），插件定义自己的 Entity/DAO，`Room.databaseBuilder` 指向此
+     * 目录即可隔离；卸载时随 pluginDir 一并删除，无需单独清理。
+     */
+    fun databaseDir(): File = File(dir, "databases").apply { mkdirs() }
 
     /** 打开插件私有文件输出流。 */
     fun openFileOutput(name: String, mode: Int = Context.MODE_PRIVATE): FileOutputStream =
