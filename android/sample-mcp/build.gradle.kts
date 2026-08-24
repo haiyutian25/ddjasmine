@@ -68,11 +68,11 @@ pluginPack {
 }
 
 dependencies {
-    // 宿主 API 聚合门面：compileOnly + host-api 的 api 传递，编译期即可 import
-    // 宿主 PluginHost / 主题 / Compose / Ktor 等全部共享 API，运行时 parent-first
+    // 框架内置的插件开发 API 门面：core-plugin 已用 api 传递宿主主题 / Compose /
+    // Ktor 等全部共享 API，compileOnly 一个依赖即可 import，运行时 parent-first
     // 从宿主解析。用 compileOnly 而非 implementation：不让 project 依赖进入 runtime
     // classpath，避免 PluginPackPlugin resolve 时的 variant 歧义。
-    compileOnly(project(":host-api"))
+    compileOnly(project(":core-plugin"))
 
     // 宿主没有的官方 MCP SDK，打进插件 DEX；其传递的 Ktor/OkHttp/Okio 等
     // 宿主已提供，由 PluginPackPlugin 自动排除，无需任何 excludeGroups。

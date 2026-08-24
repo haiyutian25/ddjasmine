@@ -126,9 +126,19 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
-    // 插件 UI 契约：@Composable 注解（api 使插件 compileOnly 时可见）
+    // 插件开发 API 门面（api 传递）：插件只需 compileOnly(core-plugin) 一个依赖
+    // 即可 import 宿主的主题 / Compose / Ktor 等全部共享 API，运行时 parent-first
+    // 从宿主解析，无需新建独立门面模块或逐个声明 compileOnly。
+    api(project(":core-ui"))
     api(platform(libs.androidx.compose.bom))
     api(libs.androidx.compose.runtime)
+    api(libs.androidx.compose.ui)
+    api(libs.androidx.compose.foundation)
+    api(libs.androidx.compose.material3)
+    api(libs.androidx.compose.material.icons.core)
+    api(libs.androidx.activity.compose)
+    api(libs.ktor.client.core)
+    api(libs.ktor.client.okhttp)
 
     // Runtime DEX class-index scan (build-time scan is the primary source);
     // dexlib2's API surface exposes guava types, so guava must be explicit.
