@@ -88,8 +88,10 @@ android {
 
     sourceSets {
         getByName("main") {
-            // 追加插件权限合并片段（generatePluginPermissions 生成）
-            manifest.srcFile("src/main/plugin-permissions.xml")
+            // 宿主 Manifest 由 generatePluginPermissions 生成到 build/（模板 =
+            // src/main/AndroidManifest.xml + 注入的插件权限）。注意 srcFile 是
+            // 替换语义而非追加：直接指向权限片段会丢 label/图标/入口 Activity。
+            manifest.srcFile("build/generated/pluginPermissions/AndroidManifest.xml")
         }
     }
 }
@@ -113,13 +115,14 @@ val pluginModules = listOf(":sample-plugin", ":sample-guide", ":sample-example",
 
 val generatePluginPermissions by tasks.registering {
     group = "build"
-    description = "Scans plugin manifests and merges their uses-permission into the host"
+    description = "Generates the host manifest: src/main template + plugin uses-permission injected"
+    val templatePath = project.file("src/main/AndroidManifest.xml").absolutePath
     val manifestPaths = pluginModules.map {
         project.rootProject.file("${it.removePrefix(":")}/src/main/AndroidManifest.xml").absolutePath
     }
-    val outPath = project.file("src/main/plugin-permissions.xml").absolutePath
-    inputs.files(manifestPaths)
-    outputs.file(project.file("src/main/plugin-permissions.xml"))
+    val outPath = project.file("build/generated/pluginPermissions/AndroidManifest.xml").absolutePath
+    inputs.files(manifestPaths + templatePath)
+    outputs.file(outPath)
     doLast {
         val permissions = linkedSetOf<String>()
         for (path in manifestPaths) {
@@ -129,13 +132,16 @@ val generatePluginPermissions by tasks.registering {
                 permissions += m.groupValues[1]
             }
         }
-        val xml = buildString {
-            appendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
-            appendLine("<!-- 自动生成：generatePluginPermissions 从插件 manifest 收集，勿手改 -->")
-            appendLine("<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">")
-            permissions.sorted().forEach { appendLine("    <uses-permission android:name=\"$it\" />") }
-            appendLine("</manifest>")
+        val template = File(templatePath).readText()
+        // 宿主模板已声明的不再重复注入
+        Regex("<uses-permission\\s+android:name=\"([^\"]+)\"").findAll(template).forEach {
+            permissions -= it.groupValues[1]
         }
+        val injection = buildString {
+            appendLine("    <!-- 自动生成：从插件 manifest 收集，勿手改 -->")
+            permissions.sorted().forEach { appendLine("    <uses-permission android:name=\"$it\" />") }
+        }
+        val xml = template.replaceFirst("</manifest>", "$injection</manifest>")
         val out = File(outPath)
         out.parentFile?.mkdirs()
         out.writeText(xml)

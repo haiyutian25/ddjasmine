@@ -79,14 +79,36 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // Markdown rendering for model replies (GFM tables/task lists/code,
-    // streaming-aware state for live output). collections-immutable is the
-    // renderer's runtime need — declared explicitly because the mirror's
-    // incomplete artifacts silently dropped it from the APK before.
-    implementation(libs.markdown.renderer)
-    implementation(libs.markdown.renderer.m3)
-    implementation(libs.markdown.renderer.code)
-    implementation(libs.kotlinx.collections.immutable)
+    // Markdown rendering for model replies: Markwon (View-based, wrapped in
+    // AndroidView — see ui/MarkdownText.kt). prism4j-bundler is a javac
+    // annotation processor: compileOnly exposes the @PrismBundle annotation,
+    // annotationProcessor runs it over ui/PrismSupport.java to generate the
+    // GrammarLocator (Kotlin compiles before generated Java, so the holder
+    // and factory stay in Java).
+    implementation(libs.markwon.core)
+    implementation(libs.markwon.ext.tables)
+    implementation(libs.markwon.ext.strikethrough)
+    implementation(libs.markwon.ext.latex)
+    implementation(libs.markwon.image)
+    implementation(libs.markwon.html)
+    implementation(libs.markwon.inline.parser)
+    implementation(libs.markwon.linkify)
+    // markwon/prism4j 传递的旧版 annotations-java5 与 Kotlin 传递的
+    // annotations 23.0.0 类重复（checkDuplicateClasses 失败），排除旧版。
+    implementation(libs.markwon.syntax.highlight) {
+        exclude(group = "org.jetbrains", module = "annotations-java5")
+    }
+    implementation(libs.prism4j) {
+        exclude(group = "org.jetbrains", module = "annotations-java5")
+    }
+    compileOnly(libs.prism4j.bundler)
+    annotationProcessor(libs.prism4j.bundler)
+
+    // Coil 3：全项目唯一图片加载引擎。Markdown 内嵌图片经自定义 SchemeHandler
+    // 桥接（见 ui/MarkdownText.kt）；coil-compose 供聊天图片 UI（AsyncImage）。
+    implementation(libs.coil.core)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 
     // Navigation
     implementation(libs.androidx.navigation3.runtime)

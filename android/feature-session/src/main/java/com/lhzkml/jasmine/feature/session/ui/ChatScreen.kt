@@ -80,9 +80,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lhzkml.jasmine.core.ui.InkBlack
 import com.lhzkml.jasmine.core.ui.JasmineBottomSheet
 import com.lhzkml.jasmine.feature.session.R
-import com.mikepenz.markdown.m3.Markdown
-import com.mikepenz.markdown.model.rememberMarkdownState
-import com.mikepenz.markdown.model.rememberStreamingMarkdownState
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -481,10 +478,9 @@ private fun TimelineStep(label: String, content: String, showStem: Boolean) {
 
 /**
  * The live assistant output while the provider streams. Thinking deltas
- * render above the final content as plain text; the reply body renders
- * through the streaming Markdown state, which re-parses only the unstable
- * tail on each append. Before the first delta arrives nothing renders here
- * so the page-level waiting animation shows.
+ * render above the final content as plain text; the reply body goes through
+ * the Markdown renderer on each delta. Before the first delta arrives
+ * nothing renders here so the page-level waiting animation shows.
  */
 @Composable
 private fun StreamingAssistantBlock(reasoning: String, text: String, userRequest: String) {
@@ -501,22 +497,25 @@ private fun StreamingAssistantBlock(reasoning: String, text: String, userRequest
 }
 
 /**
- * Streams the growing reply into the renderer: only the appended slice is
- * fed in, so finished blocks above the unstable tail keep their layout —
- * the renderer's native streaming state re-parses just the tail, not the
- * whole document, on every delta.
+ * Streams the growing reply into the renderer with throttled re-parse.
+ * Markwon has no incremental tail state — feeding every token delta would
+ * re-parse the whole document per token, and a half-arrived table flickers
+ * between "paragraph" and "table" layouts, bouncing the row height (and the
+ * follow-scroll chases it: the whole list jumps). Rendering only on block
+ * boundaries (newline) or every 32 chars keeps growth monotonic: a table
+ * arrives row by row, each re-parse only appends a row, never tears one
+ * down. Trailing sub-threshold deltas are never lost — the finished reply
+ * is re-rendered in full by the history row once the stream ends.
  */
 @Composable
 private fun StreamingMarkdown(text: String) {
-    val mdState = rememberStreamingMarkdownState()
-    var fedLength by remember { mutableStateOf(0) }
+    var rendered by remember { mutableStateOf(text) }
     LaunchedEffect(text) {
-        if (text.length > fedLength) {
-            mdState.append(text.substring(fedLength))
-            fedLength = text.length
+        if (text != rendered && (text.length - rendered.length >= 32 || text.endsWith("\n"))) {
+            rendered = text
         }
     }
-    Markdown(streamingMarkdownState = mdState)
+    MarkdownText(text = rendered, modifier = Modifier.fillMaxWidth())
 }
 
 @Composable
@@ -646,12 +645,11 @@ private fun MessageBlock(fromUser: Boolean, content: String, timeMs: Long) {
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
-            // immediate=true parses synchronously so the row is born with
-            // its full height: an async-loading (zero-height) assistant row
-            // right after the streaming row is removed collapses the list
-            // and clamps the scroll position back to the top.
-            val mdState = rememberMarkdownState(content = content, retainState = true, immediate = true)
-            Markdown(markdownState = mdState)
+            // Markwon's setMarkdown parses synchronously, so the row is born
+            // with its full height: an async-loading (zero-height) assistant
+            // row right after the streaming row is removed would collapse
+            // the list and clamp the scroll position back to the top.
+            MarkdownText(text = content, modifier = Modifier.fillMaxWidth())
         }
         Text(
             DateFormat.getTimeInstance().format(Date(timeMs)),
