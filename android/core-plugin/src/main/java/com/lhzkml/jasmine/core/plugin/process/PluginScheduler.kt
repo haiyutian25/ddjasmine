@@ -94,9 +94,23 @@ object PluginScheduler {
         return PendingIntent.getBroadcast(context, requestCodeOf(pluginId, requestCode), intent, flags)
     }
 
-    /** 把 (pluginId, requestCode) 折叠成一个稳定的 PendingIntent requestCode。 */
-    private fun requestCodeOf(pluginId: String, requestCode: Int): Int =
-        ((pluginId.hashCode() and 0xFFFF) shl 16) or (requestCode and 0xFFFF)
+    /**
+     * 把 (pluginId, requestCode) 折叠成一个稳定的 PendingIntent requestCode。
+     * 此前 `pluginId.hashCode() and 0xFFFF` 只取低 16 位：两个插件的哈希低 16
+     * 位相同时，同 requestCode 的闹钟会共用同一 PendingIntent（互相覆盖/误取消）。
+     * 改用完整 32 位哈希 + 乘法/异或雪崩，碰撞概率降到 2^-32 量级。
+     *
+     * taskId 刻意不参与身份：cancel 只拿 (pluginId, requestCode)，身份必须仅由
+     * 二者导出；taskId 是标签（默认 "scheduled-$requestCode"），requestCode 即
+     * 每插件内的任务标识。
+     */
+    private fun requestCodeOf(pluginId: String, requestCode: Int): Int {
+        var h = pluginId.hashCode() * 31 + requestCode
+        h = h xor (h ushr 16)
+        h *= 0x7feb352d
+        h = h xor (h ushr 15)
+        return h
+    }
 }
 
 /**
@@ -108,16 +122,28 @@ class PluginAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val serviceClassName = intent.getStringExtra(EXTRA_SERVICE_CLASS) ?: return
         val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: "scheduled"
-        val (instanceId, proxyClass) = ServiceProxyPool.acquire(serviceClassName, taskId)
-            ?: return // 池耗尽，静默放弃（下次周期任务会再试）
-        val serviceIntent = Intent(context, proxyClass).apply {
-            putExtra(ProxyKeys.SERVICE_CLASS, serviceClassName)
-            putExtra(ProxyKeys.SERVICE_INSTANCE_ID, instanceId)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
+        // 任何失败都不能抛到 BroadcastReceiver（会崩宿主），且已占用的池
+        // 槽位必须回滚。两类确定触发：① 开机后闹钟先于框架 initialize
+        // 完成（acquire 里 coreHandle 未初始化会抛）；② Android 12+ 后台
+        // FGS 启动限制——非精确闹钟无豁免，startForegroundService 抛
+        // ForegroundServiceStartNotAllowedException。
+        var instanceId: String? = null
+        try {
+            val (id, proxyClass) = ServiceProxyPool.acquire(serviceClassName, taskId)
+                ?: return // 池耗尽，静默放弃（下次周期任务会再试）
+            instanceId = id
+            val serviceIntent = Intent(context, proxyClass).apply {
+                putExtra(ProxyKeys.SERVICE_CLASS, serviceClassName)
+                putExtra(ProxyKeys.SERVICE_INSTANCE_ID, instanceId)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (e: Throwable) {
+            android.util.Log.w("PluginScheduler", "闹钟启动插件服务失败: $serviceClassName", e)
+            instanceId?.let { ServiceProxyPool.release(it) }
         }
     }
 

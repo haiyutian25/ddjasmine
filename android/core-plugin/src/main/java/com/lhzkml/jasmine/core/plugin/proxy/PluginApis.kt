@@ -41,14 +41,21 @@ fun Context.startPluginService(
     val serviceClassName = serviceClass.name
     val (fullId, proxyClass) = ServiceProxyPool.acquire(serviceClassName, instanceId)
         ?: return false
-    startService(
-        Intent(this, proxyClass).apply {
-            putExtra(ProxyKeys.SERVICE_CLASS, serviceClassName)
-            putExtra(ProxyKeys.SERVICE_INSTANCE_ID, fullId)
-            block()
-        },
-    )
-    return true
+    return try {
+        startService(
+            Intent(this, proxyClass).apply {
+                putExtra(ProxyKeys.SERVICE_CLASS, serviceClassName)
+                putExtra(ProxyKeys.SERVICE_INSTANCE_ID, fullId)
+                block()
+            },
+        )
+        true
+    } catch (e: Throwable) {
+        // startService 抛异常（如后台 FGS 限制）必须回滚槽位，否则每次失败
+        // 永久烧掉一个代理槽。
+        ServiceProxyPool.release(fullId)
+        throw e
+    }
 }
 
 /** 绑定插件 Service（池代理）。 */
@@ -61,14 +68,21 @@ fun Context.bindPluginService(
     val serviceClassName = serviceClass.name
     val (fullId, proxyClass) = ServiceProxyPool.acquire(serviceClassName, instanceId)
         ?: return false
-    return bindService(
-        Intent(this, proxyClass).apply {
-            putExtra(ProxyKeys.SERVICE_CLASS, serviceClassName)
-            putExtra(ProxyKeys.SERVICE_INSTANCE_ID, fullId)
-        },
-        connection,
-        flags,
-    )
+    return try {
+        val bound = bindService(
+            Intent(this, proxyClass).apply {
+                putExtra(ProxyKeys.SERVICE_CLASS, serviceClassName)
+                putExtra(ProxyKeys.SERVICE_INSTANCE_ID, fullId)
+            },
+            connection,
+            flags,
+        )
+        if (!bound) ServiceProxyPool.release(fullId)
+        bound
+    } catch (e: Throwable) {
+        ServiceProxyPool.release(fullId)
+        throw e
+    }
 }
 
 /** 停止插件 Service（池代理）。 */

@@ -48,13 +48,17 @@ object CrashHook {
             if (verdict != null) {
                 runCatching { callback.onPluginCrash(verdict) }
                 // 归因到插件的崩溃也走统一事件通道，供宿主做禁用/熔断/上报。
-                PluginHost.emit(
-                    PluginEvent.Crash(
-                        pluginId = verdict.culpritPluginId ?: "",
-                        kind = verdict.kind.name,
-                        blameAttributed = verdict.culpritPluginId != null,
-                    ),
-                )
+                // emit 必须无防护地兜住：监听器抛异常会中断本 handler，导致
+                // 后面的 previous?.uncaughtException / exitProcess 被跳过。
+                runCatching {
+                    PluginHost.emit(
+                        PluginEvent.Crash(
+                            pluginId = verdict.culpritPluginId ?: "",
+                            kind = verdict.kind.name,
+                            blameAttributed = verdict.culpritPluginId != null,
+                        ),
+                    )
+                }
                 // 崩溃熔断：同步写标记（崩溃 handler 里只做最轻量、无锁的写入）。
                 verdict.culpritPluginId?.let { id ->
                     crashMarkerDir?.let { dir ->

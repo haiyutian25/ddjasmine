@@ -40,7 +40,9 @@ open class PluginHostApplication : Application() {
         if (crashCallback != null) {
             CrashHook.install(crashCallback, crashDir)
         }
-        ServiceProxyPool.configure(defaultServicePool)
+        // 让安装/卸载成功时能解除对应插件的崩溃熔断标记。
+        PluginHost.crashMarkerDir = crashDir
+        ServiceProxyPool.configure(this, defaultServicePool)
         ServiceProxyPool.configureIsolated(isolatedServicePool)
         ProcessIsolationManager.attach(this)
         // 崩溃熔断：读取上次崩溃归因产生的标记，本次启动跳过这些插件，
@@ -50,23 +52,35 @@ open class PluginHostApplication : Application() {
             ?.map { it.name.removeSuffix(".crash") }
             ?.toSet() ?: emptySet()
         CoroutineScope(Dispatchers.IO).launch {
-            if (ProcessIdentity.isIsolatedProcess(this@PluginHostApplication)) {
-                // Isolated process: init the runtime but load nothing up
-                // front — IsolatedPluginProcessService drives the load.
-                PluginHost.initialize(this@PluginHostApplication, pluginPolicy()) { false }
-            } else {
-                // Host process: init and auto-load every enabled plugin
-                // except crash-fused plugins. Isolated plugins load their UI
-                // companion here (when declared) and their native entry in the
-                // isolated process.
-                PluginHost.initialize(this@PluginHostApplication, pluginPolicy()) { record ->
-                    record.pluginId !in crashedPlugins
+            // 初始化失败不能拖垮宿主：框架半初始化曾导致启动崩溃循环。
+            // 失败仅记录，宿主以“无插件”状态继续运行（PluginHost 内部已
+            // 回滚自身状态，下次调用方可安全重试）。
+            runCatching {
+                if (ProcessIdentity.isIsolatedProcess(this@PluginHostApplication)) {
+                    // Isolated process: init the runtime but load nothing up
+                    // front — IsolatedPluginProcessService drives the load.
+                    PluginHost.initialize(this@PluginHostApplication, pluginPolicy()) { false }
+                } else {
+                    // Host process: init and auto-load every enabled plugin
+                    // except crash-fused plugins. Isolated plugins load their UI
+                    // companion here (when declared) and their native entry in the
+                    // isolated process.
+                    PluginHost.initialize(this@PluginHostApplication, pluginPolicy()) { record ->
+                        record.pluginId !in crashedPlugins
+                    }
+                    onPluginFrameworkReady()()
+                    // 观测上次 native 崩溃（Java handler 无法捕获的场景）
+                    PluginHost.observePreviousNativeCrash()
                 }
-                onPluginFrameworkReady()()
-                // 观测上次 native 崩溃（Java handler 无法捕获的场景）
-                PluginHost.observePreviousNativeCrash()
+            }.onFailure {
+                android.util.Log.e("PluginHost", "插件框架初始化失败，宿主继续以无插件状态运行", it)
             }
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        PluginHost.onConfigurationChanged(newConfig)
     }
 
     override fun onLowMemory() {

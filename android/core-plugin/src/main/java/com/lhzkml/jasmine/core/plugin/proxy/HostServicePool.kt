@@ -50,10 +50,15 @@ val defaultServicePool: List<Class<out HostService>> = listOf(
     HostService19::class.java, HostService20::class.java,
 )
 
-/** The manifest-declared isolated-process pool, in slot order. */
-val isolatedServicePool: List<Class<out HostService>> = listOf(
-    IsolatedHostService1::class.java, IsolatedHostService2::class.java,
-    IsolatedHostService3::class.java, IsolatedHostService4::class.java,
-    IsolatedHostService5::class.java, IsolatedHostService6::class.java,
-    IsolatedHostService7::class.java, IsolatedHostService8::class.java,
+/**
+ * The isolated-process service pools, keyed by 1-based process slot. Each
+ * slot gets its own proxies declared with the matching `android:process`
+ * (`:plugin_isolated` / `_2` / `_3` / `_4`), so a slot-N plugin's services run
+ * in the same process as the plugin itself.
+ */
+val isolatedServicePool: Map<Int, List<Class<out HostService>>> = mapOf(
+    1 to listOf(IsolatedHostService1::class.java, IsolatedHostService2::class.java),
+    2 to listOf(IsolatedHostService3::class.java, IsolatedHostService4::class.java),
+    3 to listOf(IsolatedHostService5::class.java, IsolatedHostService6::class.java),
+    4 to listOf(IsolatedHostService7::class.java, IsolatedHostService8::class.java),
 )

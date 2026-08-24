@@ -5,6 +5,7 @@ import android.os.IBinder
 import android.os.IInterface
 import android.os.Parcel
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * Cross-process service bridge. Plugins in an isolated process publish
@@ -86,12 +87,72 @@ class PluginProcessBridge private constructor(
         }
     }
 
+    /**
+     * 为 [instanceId] 分配一个隔离服务代理类名（池权威在隔离进程，宿主经此
+     * 同步分配；返回 null 表示本槽池耗尽）。
+     */
+    fun acquireServiceSlot(instanceId: String): String? {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            data.writeString(instanceId)
+            handle.transact(TX_ACQUIRE_SLOT, data, reply, 0)
+            reply.readException()
+            reply.readString()
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
+    /** 归还一个隔离服务槽位（宿主主动回滚 / 停止时调用）。 */
+    fun releaseServiceSlot(instanceId: String) {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            data.writeString(instanceId)
+            handle.transact(TX_RELEASE_SLOT, data, reply, 0)
+            reply.readException()
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
+    /** 查询 instanceId 当前占用的代理类名，未占用返回 null。 */
+    fun serviceProxyClass(instanceId: String): String? {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            data.writeString(instanceId)
+            handle.transact(TX_PROXY_CLASS, data, reply, 0)
+            reply.readException()
+            reply.readString()
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
     companion object {
         private const val DESCRIPTOR = "jasmine.plugin.process.bridge"
         private const val TX_REGISTER = 1
         private const val TX_UNREGISTER = 2
         private const val TX_RESOLVE = 3
         private const val TX_NAMES = 4
+        private const val TX_ACQUIRE_SLOT = 5
+        private const val TX_RELEASE_SLOT = 6
+        private const val TX_PROXY_CLASS = 7
+
+        /**
+         * 宿主目录在隔离进程目录里的保留名：宿主在 bind 各槽 bridge 时把自己的
+         * server binder 注册到隔离进程，隔离进程据此解析宿主发布的远程服务
+         * （RemoteServices 双向：隔离发布→宿主消费，宿主发布→隔离消费）。
+         */
+        const val HOST_DIRECTORY_KEY = "__jasmine_host_directory"
 
         /** The process-local singleton server (name→Binder directory). */
         private val serverInstance = Server()
@@ -118,8 +179,44 @@ class PluginProcessBridge private constructor(
             fun names(): List<String> = serverInstance.keys().toList()
         }
 
+        /**
+         * 隔离服务池的进程内直接访问（隔离进程侧 release 用，避免自 transact）。
+         * 池权威在本进程的 [Server]，宿主经 bridge 的 acquireServiceSlot 等方法
+         * 同步调用。
+         */
+        val servicePool: ServicePoolDirectory get() = ServicePoolDirectory
+
+        object ServicePoolDirectory {
+            fun acquire(instanceId: String): String? = serverInstance.acquireServiceSlotLocal(instanceId)
+            fun release(instanceId: String) = serverInstance.releaseServiceSlotLocal(instanceId)
+            fun proxyClass(instanceId: String): String? = serverInstance.serviceProxyClassLocal(instanceId)
+        }
+
+        /** 种子本进程（=本隔离槽）的隔离服务代理池。 */
+        fun seedServicePool(classNames: List<String>) = serverInstance.seedServicePool(classNames)
+
         private class Server : Binder() {
             private val services = ConcurrentHashMap<String, IBinder>()
+
+            // 隔离服务池（本进程=本隔离槽）：instanceId → 代理类名，权威在此。
+            private val poolAvailable = ConcurrentLinkedQueue<String>()
+            private val poolActive = ConcurrentHashMap<String, String>()
+
+            fun seedServicePool(classNames: List<String>) {
+                poolAvailable.clear()
+                poolAvailable.addAll(classNames)
+            }
+
+            fun acquireServiceSlotLocal(instanceId: String): String? {
+                poolActive[instanceId]?.let { return it }
+                return poolAvailable.poll()?.also { poolActive[instanceId] = it }
+            }
+
+            fun releaseServiceSlotLocal(instanceId: String) {
+                poolActive.remove(instanceId)?.let { poolAvailable.offer(it) }
+            }
+
+            fun serviceProxyClassLocal(instanceId: String): String? = poolActive[instanceId]
 
             fun put(name: String, token: IBinder) {
                 services[name] = token
@@ -160,6 +257,26 @@ class PluginProcessBridge private constructor(
                         data.enforceInterface(DESCRIPTOR)
                         reply?.writeNoException()
                         reply?.writeStringList(keys().toList())
+                        return true
+                    }
+                    TX_ACQUIRE_SLOT -> {
+                        data.enforceInterface(DESCRIPTOR)
+                        val id = data.readString() ?: ""
+                        reply?.writeNoException()
+                        reply?.writeString(acquireServiceSlotLocal(id))
+                        return true
+                    }
+                    TX_RELEASE_SLOT -> {
+                        data.enforceInterface(DESCRIPTOR)
+                        data.readString()?.let { releaseServiceSlotLocal(it) }
+                        reply?.writeNoException()
+                        return true
+                    }
+                    TX_PROXY_CLASS -> {
+                        data.enforceInterface(DESCRIPTOR)
+                        val id = data.readString() ?: ""
+                        reply?.writeNoException()
+                        reply?.writeString(serviceProxyClassLocal(id))
                         return true
                     }
                     else -> return super.onTransact(code, data, reply, flags)

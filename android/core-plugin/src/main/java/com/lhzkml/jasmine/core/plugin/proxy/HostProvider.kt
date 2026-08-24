@@ -20,9 +20,9 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Routing is decided by the Rust core (authority → owning plugin);
  * rewriting follows the memo'd rules: drop the first segment, restore the
- * original authority, clear query/fragment; `insert` results are re-wrapped
- * under the host authority. `exported=false` providers reject cross-UID
- * callers.
+ * original authority, preserve query/fragment; `insert` results are
+ * re-wrapped under the host authority. `exported=false` providers reject
+ * cross-UID callers.
  */
 open class HostProvider : ContentProvider() {
 
@@ -69,25 +69,28 @@ open class HostProvider : ContentProvider() {
             throw SecurityException("权限拒绝: Provider $className 未导出")
         }
 
-        val provider = instances.getOrPut(className) {
+        // computeIfAbsent 保证并发首次访问只实例化一次（getOrPut 非原子，
+        // 两个并发 query 可能各建一个 Provider 实例）。
+        val provider = instances.computeIfAbsent(className) {
             val p = PluginHost.instantiateComponent(pluginId, className) as? ContentProvider
                 ?: throw IllegalStateException("$className 不是 ContentProvider")
-            // 补 attachInfo + onCreate：让插件 Provider 的 getContext() 可用并走正常
-            // 生命周期（否则直接 newInstance 会导致 getContext() 为 null、onCreate 不执行）。
+            // 只调 attachInfo：AOSP 的 attachInfo(Context, ProviderInfo) 在
+            // mContext == null 时内部自己会调 onCreate()（Android 7.0 至今），
+            // 再显式调一次会让插件 Provider 双初始化（DB/句柄开两遍）。
             val info = ProviderInfo().apply {
                 authority = pluginAuthority
+                packageName = context?.packageName
                 applicationInfo = context?.applicationInfo
             }
             p.attachInfo(context, info)
-            p.onCreate()
             p
         }
         val originalPath = uri.pathSegments.drop(1).joinToString("/")
+        // 保留 query/fragment：调用侧 pluginProxyUri 原样携带它们，代理若
+        // 清除会丢失调用方的查询条件（此前两侧自相矛盾）。
         val rewritten = uri.buildUpon()
             .authority(pluginAuthority)
             .path(originalPath)
-            .clearQuery()
-            .fragment(null)
             .build()
         return Forward(provider, rewritten)
     }

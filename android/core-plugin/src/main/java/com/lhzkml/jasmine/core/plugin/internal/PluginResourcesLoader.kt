@@ -26,24 +26,24 @@ import java.util.zip.ZipFile
  */
 internal object PluginResourcesLoader {
 
-    fun load(application: Application, apkPath: String): Resources {
+    fun load(application: Application, apkPath: String): LoadedResources {
         val host = application.resources
         val assets = newHostBasedAssets(application)
         val resources = Resources(assets, host.displayMetrics, host.configuration)
+        var provider: ResourcesProvider? = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val loader = ResourcesLoader()
             val fd = ParcelFileDescriptor.open(
                 File(apkPath),
                 ParcelFileDescriptor.MODE_READ_ONLY,
             )
-            loader.addProvider(
-                ResourcesProvider.loadFromApk(fd, PluginAssetsProvider(File(apkPath))),
-            )
+            provider = ResourcesProvider.loadFromApk(fd, PluginAssetsProvider(File(apkPath)))
+            loader.addProvider(provider)
             resources.addLoaders(loader)
         } else {
             addAssetPath(assets, apkPath)
         }
-        return resources
+        return LoadedResources(resources, provider)
     }
 
     /**
@@ -52,6 +52,10 @@ internal object PluginResourcesLoader {
      */
     private fun newHostBasedAssets(application: Application): AssetManager {
         val assets = AssetManager::class.java.getDeclaredConstructor().newInstance()
+        // 反射新建的 AssetManager 默认不含 framework-res.apk（package id 0x01）：
+        // 插件资源引用 @android: 系统资源/主题会 NotFoundException。显式补挂。
+        val frameworkRes = File("/system/framework/framework-res.apk")
+        if (frameworkRes.exists()) addAssetPath(assets, frameworkRes.absolutePath)
         addAssetPath(assets, application.packageResourcePath)
         return assets
     }
@@ -61,6 +65,20 @@ internal object PluginResourcesLoader {
         AssetManager::class.java
             .getMethod("addAssetPath", String::class.java)
             .invoke(assets, path)
+    }
+}
+
+/** 插件资源及其释放句柄：卸载时 [close] 释放 PFD 与 AssetManager。 */
+internal class LoadedResources(
+    val resources: Resources,
+    private val provider: ResourcesProvider?,
+) {
+    fun close() {
+        // 关闭 ResourcesProvider（AutoCloseable）会释放 loadFromApk 传入的
+        // ParcelFileDescriptor 及其 AssetsProvider。此前只 close assets 会泄漏 PFD；
+        // Resources/ResourcesLoader 均无公开 close()。
+        runCatching { provider?.close() }
+        runCatching { resources.assets.close() }
     }
 }
 
@@ -81,7 +99,9 @@ internal class PluginAssetsProvider(
         runCatching {
             ZipFile(packageFile).use { zip ->
                 val entry = zip.getEntry("assets/$path") ?: return null
-                val out = File(cacheDir, "${path.replace("/", "_")}.${entry.size}")
+                // 缓存名用路径的 SHA-256：此前 `path.replace("/","_")` 会让
+                // `a/b` 与 `a_b` 落到同一文件名，同大小时互相覆盖、读到错误资源。
+                val out = File(cacheDir, "${sha256(path)}.${entry.size}")
                 if (!out.exists() || out.length() != entry.size) {
                     zip.getInputStream(entry).use { input ->
                         FileOutputStream(out).use { output -> input.copyTo(output) }
@@ -92,6 +112,11 @@ internal class PluginAssetsProvider(
                 android.content.res.AssetFileDescriptor(fd, 0, entry.size)
             }
         }.getOrNull()
+
+    private fun sha256(s: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(s.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     /**
      * Bounds the extracted-asset cache. On overflow, drops oldest-first until

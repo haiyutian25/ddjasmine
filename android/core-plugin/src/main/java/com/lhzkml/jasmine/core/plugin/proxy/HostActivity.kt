@@ -138,7 +138,13 @@ open class HostActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        pluginActivity?.onNewIntent(intent)
+        val current = pluginActivity ?: return
+        val target = intent.getStringExtra(ProxyKeys.ACTIVITY_CLASS)
+        // launchMode 占坑只按模式分槽、不按类：两个同模式插件 Activity 会
+        // 复用同一个代理实例。校验目标类，避免把 B 的启动 Intent 喂给正
+        // 在显示的 A（不匹配时丢弃，交由正确的下次启动处理）。
+        if (target != null && target != current.javaClass.name) return
+        current.onNewIntent(intent)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

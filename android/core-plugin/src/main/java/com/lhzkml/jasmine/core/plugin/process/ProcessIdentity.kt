@@ -38,5 +38,20 @@ object ProcessIdentity {
 
     /** True when this code is executing in the isolated plugin process. */
     fun isIsolatedProcess(application: Application): Boolean =
-        currentProcessName(application).endsWith(ISOLATED_SUFFIX)
+        currentIsolatedSlot(application) != null
+
+    /**
+     * 当前进程的隔离槽号（1-based）；非隔离进程（宿主）返回 null。
+     * 槽 2-4 的进程名是 ":plugin_isolated_2/3/4"：裸 endsWith(ISOLATED_SUFFIX)
+     * 会误判，故按 `:plugin_isolated` + 可选 `_N` 后缀精确解析。
+     */
+    fun currentIsolatedSlot(application: Application): Int? {
+        val base = application.packageName + ISOLATED_SUFFIX
+        val name = currentProcessName(application)
+        return when {
+            name == base -> 1
+            name.startsWith("${base}_") -> name.removePrefix("${base}_").toIntOrNull()
+            else -> null
+        }
+    }
 }

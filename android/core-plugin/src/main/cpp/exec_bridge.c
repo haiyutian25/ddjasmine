@@ -46,17 +46,22 @@ Java_com_lhzkml_jasmine_core_plugin_proxy_ExecBridge_nativeRun(
         return -3; // no `main` symbol
     }
 
-    jsize argc = args ? (*env)->GetArrayLength(env, args) : 0;
+    // C 约定 argv[0] 是程序名：此前直接把用户参数放进 argv[0..]，导致被加载
+    // 程序的第一个真实参数被当成程序名静默忽略、argc 少 1。这里补上
+    // argv[0] = 可执行文件路径，用户参数整体后移一位。
+    jsize user_argc = args ? (*env)->GetArrayLength(env, args) : 0;
+    int argc = (int)user_argc + 1;
     char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
     if (!argv) {
         dlclose(handle);
         (*env)->ReleaseStringUTFChars(env, path, path_str);
         return -4;
     }
-    for (int i = 0; i < argc; i++) {
+    argv[0] = strdup(path_str);
+    for (int i = 0; i < user_argc; i++) {
         jstring s = (jstring)(*env)->GetObjectArrayElement(env, args, i);
         const char *cs = (*env)->GetStringUTFChars(env, s, NULL);
-        argv[i] = cs ? strdup(cs) : strdup("");
+        argv[i + 1] = cs ? strdup(cs) : strdup("");
         if (cs) {
             (*env)->ReleaseStringUTFChars(env, s, cs);
         }

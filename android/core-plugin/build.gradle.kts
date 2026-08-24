@@ -66,6 +66,11 @@ android {
             )
         }
     }
+
+    sourceSets {
+        // UniFFI 绑定生成到 build/generated/uniffi（见 generateBindings 任务）。
+        getByName("main").java.srcDir("build/generated/uniffi")
+    }
 }
 
 kotlin {
@@ -80,16 +85,23 @@ kotlin {
 // (uniffi-kotlin-override.toml) so both modules can coexist.
 // ---------------------------------------------------------------------------
 val rustDir = rootProject.file("../rust")
-val hostLibName = if (System.getProperty("os.name", "").lowercase().contains("win")) {
-    "ffi.dll"
-} else {
-    "libffi.so"
+val hostOs = System.getProperty("os.name", "").lowercase()
+val hostLibName = when {
+    hostOs.contains("win") -> "ffi.dll"
+    hostOs.contains("mac") || hostOs.contains("darwin") -> "libffi.dylib"
+    else -> "libffi.so"
 }
+val hostLib = File(rustDir, "target/release/$hostLibName")
+val uniffiOutDir = layout.buildDirectory.dir("generated/uniffi")
+// Rust 源 + manifest 变化时才重编译/重生成，避免每次构建无条件跑 cargo+bindgen。
+val ffiInputs = fileTree(rustDir) { include("src/**/*.rs", "**/Cargo.toml") }
 
 val cargoBuildHostLib by tasks.registering(Exec::class) {
     group = "build"
     description = "Build the host Rust cdylib that UniFFI bindings are generated from"
     workingDir = rustDir
+    inputs.files(ffiInputs)
+    outputs.file(hostLib)
     commandLine("cargo", "build", "--release", "-p", "ffi")
 }
 
@@ -98,12 +110,17 @@ val generateBindings by tasks.registering(Exec::class) {
     description = "Regenerate plugin-runtime UniFFI Kotlin bindings from the host cdylib"
     dependsOn(cargoBuildHostLib)
     workingDir = rustDir
+    // 输入=cdylib+覆盖配置，输出=生成目录：cdylib 未变则跳过（增量）。
+    inputs.file(hostLib)
+    inputs.file(layout.projectDirectory.file("uniffi-kotlin-override.toml"))
+    outputs.dir(uniffiOutDir)
     commandLine(
         "cargo", "run", "--release", "-p", "uniffi-bindgen", "--",
         "generate", "--library", "$rustDir/target/release/$hostLibName",
         "--language", "kotlin",
         "--config", layout.projectDirectory.file("uniffi-kotlin-override.toml").asFile.absolutePath,
-        "--out-dir", layout.projectDirectory.dir("src/main/java").asFile.absolutePath,
+        // 写入 build/ 而非 src/main/java：源码树不被生成物污染、不会读到半成品。
+        "--out-dir", uniffiOutDir.get().asFile.absolutePath,
     )
 }
 

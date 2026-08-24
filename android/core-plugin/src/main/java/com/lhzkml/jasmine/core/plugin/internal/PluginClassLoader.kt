@@ -63,5 +63,9 @@ internal class PluginClassLoader(
 
     /** Own-DEX-only lookup; never delegates, so cross-plugin recursion is impossible. */
     @Throws(ClassNotFoundException::class)
-    fun findClassLocally(name: String): Class<*> = findClass(name)
+    fun findClassLocally(name: String): Class<*> =
+        // 先查已加载表：跨插件借类是“定义发生在目标 loader”，同一类第二次被
+        // 借用时裸 findClass 会重复 defineClass 抛 LinkageError（不是 CNFE，
+        // 借方 catch 接不住）。
+        findLoadedClass(name) ?: findClass(name)
 }

@@ -41,10 +41,12 @@
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
-        <!-- Centralized static-broadcast proxy: shared system action set -->
+        <!-- Centralized static-broadcast proxy: shared system action set.
+             exported=false：系统广播（含受保护广播与非受保护的 CONNECTIVITY_CHANGE）
+             仍由系统特权源送达，但第三方无法显式/隐式投递伪造"系统广播"给插件。 -->
         <receiver
             android:name=".proxy.HostReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
@@ -190,37 +192,37 @@
                 android:value="插件隔离进程服务代理" />
         </service>
         <service android:name=".proxy.IsolatedHostService3" android:exported="false"
-            android:process=":plugin_isolated"
+            android:process=":plugin_isolated_2"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="插件隔离进程服务代理" />
         </service>
         <service android:name=".proxy.IsolatedHostService4" android:exported="false"
-            android:process=":plugin_isolated"
+            android:process=":plugin_isolated_2"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="插件隔离进程服务代理" />
         </service>
         <service android:name=".proxy.IsolatedHostService5" android:exported="false"
-            android:process=":plugin_isolated"
+            android:process=":plugin_isolated_3"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="插件隔离进程服务代理" />
         </service>
         <service android:name=".proxy.IsolatedHostService6" android:exported="false"
-            android:process=":plugin_isolated"
+            android:process=":plugin_isolated_3"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="插件隔离进程服务代理" />
         </service>
         <service android:name=".proxy.IsolatedHostService7" android:exported="false"
-            android:process=":plugin_isolated"
+            android:process=":plugin_isolated_4"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="插件隔离进程服务代理" />
         </service>
         <service android:name=".proxy.IsolatedHostService8" android:exported="false"
-            android:process=":plugin_isolated"
+            android:process=":plugin_isolated_4"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="插件隔离进程服务代理" />

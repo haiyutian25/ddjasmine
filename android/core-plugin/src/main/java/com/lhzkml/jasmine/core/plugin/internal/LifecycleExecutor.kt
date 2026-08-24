@@ -18,12 +18,13 @@ internal class LoadedPlugin(
     val entry: PluginEntry,
     val resources: android.content.res.Resources,
     val app: android.app.Application? = null,
+    /** 宿主进程里加载的隔离插件 UI 伴侣（主入口在隔离进程）。 */
+    val uiOnly: Boolean = false,
+    private val resourcesHolder: LoadedResources,
 ) {
-    /** Releases native resource tables (API 30+ close) on unload. */
+    /** Releases native resource tables on unload. */
     fun release() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            runCatching { resources.assets.close() }
-        }
+        resourcesHolder.close()
     }
 }
 
@@ -54,6 +55,12 @@ internal class LifecycleExecutor(
     /** Invoked whenever the loaded set changes (load/unload), so the host
      *  can recompute reactive views like the dynamic menu entries. */
     var onChange: (() -> Unit)? = null
+
+    /** 宿主加载了隔离插件的 UI 伴侣后回调（用于启动隔离进程的主入口）。 */
+    var onUiCompanionLoaded: ((String) -> Unit)? = null
+
+    /** 宿主里加载的是否为 UI 伴侣（而非完整主入口）。 */
+    fun isUiOnlyLoaded(pluginId: String): Boolean = loaded[pluginId]?.uiOnly == true
 
     val loadedPlugins: Map<String, LoadedPlugin> get() = loaded
 
@@ -127,7 +134,7 @@ internal class LifecycleExecutor(
             } else {
                 null
             }
-            val resources = PluginResourcesLoader.load(
+            val loadedResources = PluginResourcesLoader.load(
                 application,
                 payloadFile(pluginId).absolutePath,
             )
@@ -135,15 +142,20 @@ internal class LifecycleExecutor(
                 application = application,
                 pluginId = pluginId,
                 pluginDir = record.installPath,
-                resources = resources,
+                resources = loadedResources.resources,
             )
             entry.onLoad(context)
             if (!uiOnly) entry.onNativeReady(context)
-            loaded[pluginId] = LoadedPlugin(record, classLoader, entry, resources, pluginApp)
+            loaded[pluginId] = LoadedPlugin(record, classLoader, entry, loadedResources.resources, pluginApp, uiOnly, loadedResources)
             serviceTables[pluginId] = entry.services
             // UI 入口不注册 receivers/providers（这些组件属于主入口所在进程）。
             staticActions[pluginId] = if (uiOnly) emptySet() else registerComponents(record)
             onChange?.invoke()
+            if (uiOnly) {
+                // 宿主只加载了 UI 伴侣：主入口仍需在隔离进程启动。此前无人
+                // 触发，重启后隔离进程永远不启动（界面却显示“已加载”）。
+                onUiCompanionLoaded?.invoke(pluginId)
+            }
         } catch (e: Throwable) {
             loaded.remove(pluginId)
             serviceTables.remove(pluginId)
@@ -158,10 +170,14 @@ internal class LifecycleExecutor(
         val plugin = loaded.remove(pluginId) ?: return
         serviceTables.remove(pluginId)
         staticActions.remove(pluginId)?.let { StaticReceiverDispatcher.unregisterActions(application, it) }
-        try {
-            plugin.entry.onNativeRelease()
-        } catch (e: Throwable) {
-            failureCallback?.onFailure(pluginId, "native-release", e)
+        // 与 onLoad 对称：UI 伴侣加载时未调 onNativeReady，卸载也不应调
+        // onNativeRelease（否则对未初始化的 native 侧做释放）。
+        if (!plugin.uiOnly) {
+            try {
+                plugin.entry.onNativeRelease()
+            } catch (e: Throwable) {
+                failureCallback?.onFailure(pluginId, "native-release", e)
+            }
         }
         try {
             plugin.entry.onUnload()
@@ -226,15 +242,56 @@ internal class LifecycleExecutor(
             val clazz = classLoader.loadClass(applicationClass)
             val app = clazz.getDeclaredConstructor().newInstance() as? android.app.Application
                 ?: return null
-            val attach = android.app.Application::class.java
-                .getDeclaredMethod("attach", android.content.Context::class.java)
-            attach.isAccessible = true
-            attach.invoke(app, application)
-            app.onCreate()
+            // Application.onCreate 契约要求主线程：插件常在其中建 Handler、
+            // 弹 Toast、初始化主线程 SDK。加载流程跑在 IO 线程，这里切到
+            // 主线程同步执行（此前在 IO 线程直接调，违反契约）。
+            runOnMainThread {
+                val attach = android.app.Application::class.java
+                    .getDeclaredMethod("attach", android.content.Context::class.java)
+                attach.isAccessible = true
+                attach.invoke(app, application)
+                app.onCreate()
+            }
             app
         } catch (e: Throwable) {
             failureCallback?.onFailure(pluginId, "application", e)
             null
+        }
+    }
+
+    /** 在主线程同步执行 [block]；已在主线程则直接执行。异常原样抛回调用线程。 */
+    private fun runOnMainThread(block: () -> Unit) {
+        val mainLooper = android.os.Looper.getMainLooper()
+        if (android.os.Looper.myLooper() == mainLooper) {
+            block()
+            return
+        }
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var error: Throwable? = null
+        android.os.Handler(mainLooper).post {
+            try {
+                block()
+            } catch (e: Throwable) {
+                error = e
+            } finally {
+                latch.countDown()
+            }
+        }
+        latch.await()
+        error?.let { throw it }
+    }
+
+    /**
+     * 配置变化（语言/深色/字号）时刷新所有插件 Resources 快照。插件 Resources
+     * 是用加载时刻的宿主 configuration 独立构造的，不会自动跟随系统——此处
+     * 手动 updateConfiguration 让插件资源与宿主保持同步（updateConfiguration
+     * 虽已废弃，但对未注册进 ResourcesManager 的独立 Resources 仍是唯一可行
+     * 的刷新手段）。
+     */
+    fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        val metrics = application.resources.displayMetrics
+        loaded.values.forEach { plugin ->
+            runCatching { plugin.resources.updateConfiguration(newConfig, metrics) }
         }
     }
 

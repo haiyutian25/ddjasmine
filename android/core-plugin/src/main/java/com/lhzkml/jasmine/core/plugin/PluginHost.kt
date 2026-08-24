@@ -27,13 +27,17 @@ import com.lhzkml.jasmine.core.plugin.rust.FfiSignatureStrategy
 import com.lhzkml.jasmine.core.plugin.rust.FfiVerdict
 import com.lhzkml.jasmine.core.plugin.rust.PluginCoreHandle
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -76,7 +80,14 @@ fun interface AuthorizationHandler {
  */
 object PluginHost {
 
+    /** 用户授权弹框的最长等待；超时按拒绝处理（见 requestUserGrant）。 */
+    private const val USER_GRANT_TIMEOUT_MS = 120_000L
+
     private val mutex = Mutex()
+
+    /** 框架内部异步任务（如 UI 伴侣加载后启动隔离进程），不依赖调用方生命周期。 */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private var core: PluginCoreHandle? = null
     private var executor: InstallExecutor? = null
     private var lifecycle: LifecycleExecutor? = null
@@ -99,6 +110,19 @@ object PluginHost {
 
     internal fun emit(event: PluginEvent) {
         eventListener?.onEvent(event)
+    }
+
+    /**
+     * 崩溃熔断标记目录（宿主在 initialize 前设置，与 CrashHook.install 的
+     * crashMarkerDir 同一目录）。安装/卸载成功时清除对应 `<pluginId>.crash`
+     * 标记——否则插件崩溃一次即被永久禁用，重装/更新同 id 都无法解禁。
+     */
+    var crashMarkerDir: File? = null
+
+    private fun clearCrashMarker(pluginId: String) {
+        crashMarkerDir?.let { dir ->
+            runCatching { File(dir, "$pluginId.crash").delete() }
+        }
     }
 
     /** Host-settable authorization hook; Ask verdicts fail closed without it. */
@@ -232,50 +256,89 @@ object PluginHost {
                 if (!ready.isCompleted) ready.complete(Unit)
                 return@withLock
             }
-            val handle = PluginCoreHandle.open(
-                path = File(application.filesDir, "plugins.json").absolutePath,
-                strategy = policy.toFfi(),
-                hostSignatureDigests = Signatures.hostDigests(application).toList(),
-            )
-            val install = InstallExecutor(application)
-            val lc = LifecycleExecutor(
-                application = application,
-                core = handle,
-                payloadFile = install::payloadFile,
-                libDir = install::libDir,
-                readDependencies = install::readDependencies,
-                readUiEntryClass = install::readUiEntryClass,
-                readApplicationClass = install::readApplicationClass,
-                failureCallback = loadFailureCallback,
-            )
-            lc.onChange = { refreshMenuEntries(lc) }
-            core = handle
-            executor = install
-            lifecycle = lc
-            app = application
-            // 授权账本：复用宿主的 Room 单例并回放持久化授权到 Rust 核心（Rust grants 会话级）。
-            grantDb = JasmineDatabaseProvider.get(application)
-            grantDb?.pluginGrantDao()?.grantedEntries()?.forEach { g ->
-                handle.recordGrant(g.pluginId, g.permissionKey, true)
-            }
-            lc.loadEnabled(handle.allRecords().filter(loadFilter))
-            refreshMenuEntries(lc)
-            // The host serves the named-capability offload channel; the
-            // isolated process only consumes it (handlers register in the host).
-            if (!com.lhzkml.jasmine.core.plugin.process.ProcessIdentity
-                    .isIsolatedProcess(application)
-            ) {
-                runCatching {
-                    com.lhzkml.jasmine.core.plugin.process.OffloadDispatcher.startServer()
+            // 两阶段提交：先完成全部可能失败的工作（打开账本、回放授权、
+            // 加载启用插件），成功后才提交状态。此前 core 在 loadEnabled
+            // 之前提交——加载失败会同时造成 ready 永挂起、重试时误判
+            // “已初始化”而静默跳过全部插件加载。
+            try {
+                val handle = PluginCoreHandle.open(
+                    path = File(application.filesDir, "plugins.json").absolutePath,
+                    strategy = policy.toFfi(),
+                    hostSignatureDigests = Signatures.hostDigests(application).toList(),
+                )
+                val install = InstallExecutor(application)
+                val lc = LifecycleExecutor(
+                    application = application,
+                    core = handle,
+                    payloadFile = install::payloadFile,
+                    libDir = install::libDir,
+                    readDependencies = install::readDependencies,
+                    readUiEntryClass = install::readUiEntryClass,
+                    readApplicationClass = install::readApplicationClass,
+                    failureCallback = loadFailureCallback,
+                )
+                lc.onChange = { refreshMenuEntries(lc) }
+                // 宿主加载隔离插件的 UI 伴侣后，异步启动隔离进程的主入口。
+                // 不能在加载批次（持锁）内同步做跨进程操作。
+                lc.onUiCompanionLoaded = { pluginId ->
+                    scope.launch {
+                        runCatching {
+                            com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager
+                                .isolate(pluginId)
+                        }.onFailure {
+                            Log.e("PluginHost", "启动隔离进程失败: $pluginId", it)
+                        }
+                    }
                 }
+                // 授权账本：复用宿主的 Room 单例并回放持久化授权到 Rust 核心（Rust grants 会话级）。
+                val db = JasmineDatabaseProvider.get(application)
+                db?.pluginGrantDao()?.grantedEntries()?.forEach { g ->
+                    handle.recordGrant(g.pluginId, g.permissionKey, true)
+                }
+                lc.loadEnabled(handle.allRecords().filter(loadFilter))
+                refreshMenuEntries(lc)
+                // The host serves the named-capability offload channel; the
+                // isolated process only consumes it (handlers register in the host).
+                if (!com.lhzkml.jasmine.core.plugin.process.ProcessIdentity
+                        .isIsolatedProcess(application)
+                ) {
+                    runCatching {
+                        com.lhzkml.jasmine.core.plugin.process.OffloadDispatcher.startServer()
+                    }
+                }
+                core = handle
+                executor = install
+                lifecycle = lc
+                app = application
+                grantDb = db
+                ready.complete(Unit)
+            } catch (e: Throwable) {
+                core = null
+                executor = null
+                lifecycle = null
+                app = null
+                grantDb = null
+                throw e
             }
-            ready.complete(Unit)
         }
     }
 
     /** Suspends until [initialize] has finished (idempotent once ready). */
     suspend fun awaitReady() {
         ready.await()
+    }
+
+    /**
+     * 用户授权的统一入口，带超时兜底：默认实现经 application.startActivity
+     * 弹框，Android 10+ 后台启动限制（BAL）会静默丢弃该调用（无异常、无
+     * 结果广播），continuation 将永不恢复——超时按拒绝处理，保证调用方
+     * （安装/更新/checkApi）绝不永久挂起。
+     */
+    private suspend fun requestUserGrant(prompt: AuthorizationPrompt): Boolean {
+        val handler = authorizationHandler ?: return false
+        return withTimeoutOrNull(USER_GRANT_TIMEOUT_MS) {
+            handler.onAuthorization(prompt)
+        } == true
     }
 
     /**
@@ -288,81 +351,89 @@ object PluginHost {
         expectedSha256: String? = null,
         forceOverwrite: Boolean = false,
     ): FfiPluginRecord = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val handle = requireCore()
-            val install = requireExecutor()
+        val handle = requireCore()
+        val install = requireExecutor()
 
-            val metadata = install.readMetadata(apk)
-            val packageSha256 = install.digestOf(apk)
-            val request = FfiInstallRequest(
-                pluginId = metadata.packageName,
-                versionCode = metadata.versionCode.toULong(),
-                signatureDigests = Signatures.packageDigests(requireApp(), apk.absolutePath).toList(),
-                packageSha256 = packageSha256,
-                expectedSha256 = expectedSha256,
-                forceOverwrite = forceOverwrite,
-                capabilities = emptyList(),
-            )
-            when (val verdict = handle.adjudicateInstall(request)) {
+        // ---- 锁外阶段：只读裁决 + 用户授权。授权会挂起等待用户操作，
+        // 绝不能持锁（此前在 mutex 内等待，后台 BAL 丢弃授权 Activity 时
+        // continuation 永不恢复，全局锁被永久持有，整个框架死锁）。----
+        val metadata = install.readMetadata(apk)
+        val packageSha256 = install.digestOf(apk)
+        val signatureDigests = Signatures.packageDigests(requireApp(), apk.absolutePath).toList()
+        val request = FfiInstallRequest(
+            pluginId = metadata.packageName,
+            versionCode = metadata.versionCode.toULong(),
+            signatureDigests = signatureDigests,
+            packageSha256 = packageSha256,
+            expectedSha256 = expectedSha256,
+            forceOverwrite = forceOverwrite,
+            capabilities = emptyList(),
+        )
+        when (val verdict = handle.adjudicateInstall(request)) {
+            FfiVerdict.Allow -> Unit
+            is FfiVerdict.RequireUserGrant -> {
+                val granted = requestUserGrant(
+                    AuthorizationPrompt(AuthorizationPrompt.Kind.Install, metadata.packageName, verdict.reason),
+                )
+                if (!granted) throw InstallException("安装未获授权: ${metadata.packageName}")
+            }
+            is FfiVerdict.Deny -> throw InstallException("安装被拒绝: ${verdict.reason}")
+        }
+
+        val classes = com.lhzkml.jasmine.core.plugin.internal.DexScanner.scanClassNames(apk)
+        val receivers = install.parseReceivers(apk)
+        val providers = install.parseProviders(apk)
+        val permissions = install.parsePermissions(apk)
+
+        // Capability declaration: parse from metadata, adjudicate through
+        // the charter (escalate to user grant until each is authorized),
+        // then persist onto the record.
+        val capabilities = metadata.capabilities.mapNotNull { name ->
+            when (name) {
+                "exec" -> FfiCapability.EXEC
+                "gpu" -> FfiCapability.GPU
+                "network" -> FfiCapability.NETWORK
+                "storage" -> FfiCapability.STORAGE
+                "camera" -> FfiCapability.CAMERA
+                else -> null
+            }
+        }
+        if (capabilities.isNotEmpty()) {
+            when (val verdict = handle.adjudicateCapabilities(metadata.packageName, capabilities)) {
                 FfiVerdict.Allow -> Unit
                 is FfiVerdict.RequireUserGrant -> {
-                    val granted = authorizationHandler?.onAuthorization(
+                    val granted = requestUserGrant(
                         AuthorizationPrompt(AuthorizationPrompt.Kind.Install, metadata.packageName, verdict.reason),
-                    ) == true
-                    if (!granted) throw InstallException("安装未获授权: ${metadata.packageName}")
-                }
-                is FfiVerdict.Deny -> throw InstallException("安装被拒绝: ${verdict.reason}")
-            }
-
-            val classes = com.lhzkml.jasmine.core.plugin.internal.DexScanner.scanClassNames(apk)
-            val receivers = install.parseReceivers(apk)
-            val providers = install.parseProviders(apk)
-            val permissions = install.parsePermissions(apk)
-
-            // Capability declaration: parse from metadata, adjudicate through
-            // the charter (escalate to user grant until each is authorized),
-            // then persist onto the record.
-            val capabilities = metadata.capabilities.mapNotNull { name ->
-                when (name) {
-                    "exec" -> FfiCapability.EXEC
-                    "gpu" -> FfiCapability.GPU
-                    "network" -> FfiCapability.NETWORK
-                    "storage" -> FfiCapability.STORAGE
-                    "camera" -> FfiCapability.CAMERA
-                    else -> null
-                }
-            }
-            if (capabilities.isNotEmpty()) {
-                when (val verdict = handle.adjudicateCapabilities(metadata.packageName, capabilities)) {
-                    FfiVerdict.Allow -> Unit
-                    is FfiVerdict.RequireUserGrant -> {
-                        val granted = authorizationHandler?.onAuthorization(
-                            AuthorizationPrompt(AuthorizationPrompt.Kind.Install, metadata.packageName, verdict.reason),
-                        ) == true
-                        if (granted) {
-                            capabilities.forEach {
-                                handle.recordGrant(metadata.packageName, "capability:${it.name.lowercase()}", true)
-                            }
-                        } else {
-                            throw InstallException("能力授权被拒绝: ${metadata.packageName}")
+                    )
+                    if (granted) {
+                        capabilities.forEach {
+                            handle.recordGrant(metadata.packageName, "capability:${it.name.lowercase()}", true)
                         }
+                    } else {
+                        throw InstallException("能力授权被拒绝: ${metadata.packageName}")
                     }
-                    is FfiVerdict.Deny -> throw InstallException("能力被拒绝: ${verdict.reason}")
                 }
+                is FfiVerdict.Deny -> throw InstallException("能力被拒绝: ${verdict.reason}")
             }
+        }
 
+        // ---- 锁内阶段：payload 落盘 + 事务提交。全部磁盘写与账本提交
+        // 纳入同一 try：任一步失败都走 rollback（此前四次 write* 在 try
+        // 之外，中途失败会在磁盘留下与账本不一致的半成品）。----
+        mutex.withLock {
             val backup = install.placePayload(metadata.packageName, apk, classes)
-            install.writePermissions(metadata.packageName, permissions)
-            install.writeDependencies(metadata.packageName, metadata.dependencies)
-            install.writeUiEntryClass(metadata.packageName, metadata.uiEntryClass)
-            install.writeApplicationClass(metadata.packageName, metadata.applicationClass)
-            val record = install.buildRecord(
-                metadata, request.signatureDigests, packageSha256, classes, receivers, providers,
-                capabilities,
-            )
-            try {
-                handle.commitInstall(record)
+            val record = try {
+                install.writePermissions(metadata.packageName, permissions)
+                install.writeDependencies(metadata.packageName, metadata.dependencies)
+                install.writeUiEntryClass(metadata.packageName, metadata.uiEntryClass)
+                install.writeApplicationClass(metadata.packageName, metadata.applicationClass)
+                val r = install.buildRecord(
+                    metadata, signatureDigests, packageSha256, classes, receivers, providers,
+                    capabilities,
+                )
+                handle.commitInstall(r)
                 install.dropBackup(backup)
+                r
             } catch (e: Throwable) {
                 install.rollback(metadata.packageName, backup)
                 throw e
@@ -377,6 +448,8 @@ object PluginHost {
             // declare — the plugin runs with the host's permission set, so a
             // missing declaration means the feature silently won't work.
             warnMissingHostPermissions(metadata.packageName, permissions)
+            // 新装/更新成功即解除崩溃熔断（新版本理应重新获得加载机会）。
+            clearCrashMarker(metadata.packageName)
             emit(PluginEvent.Installed(metadata.packageName))
             record
         }
@@ -446,6 +519,7 @@ object PluginHost {
             val record = requireCore().commitUninstall(pluginId)
             File(record.installPath).deleteRecursively()
             grantDb?.pluginGrantDao()?.deleteByPlugin(pluginId)
+            clearCrashMarker(pluginId)
             emit(PluginEvent.Uninstalled(pluginId))
             record
         }
@@ -504,6 +578,15 @@ object PluginHost {
     fun pluginRecord(pluginId: String): FfiPluginRecord? = requireCore().pluginRecord(pluginId)
 
     fun isLoaded(pluginId: String): Boolean = lifecycle?.isLoaded(pluginId) == true
+
+    /** 宿主里加载的是否为隔离插件的 UI 伴侣（主入口在隔离进程）。 */
+    fun isUiCompanionLoaded(pluginId: String): Boolean =
+        lifecycle?.isUiOnlyLoaded(pluginId) == true
+
+    /** 转发配置变化，刷新插件 Resources 快照（宿主 Application 回调转发到此）。 */
+    fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        lifecycle?.onConfigurationChanged(newConfig)
+    }
 
     fun loadedPluginIds(): List<String> = lifecycle?.loadedIds() ?: emptyList()
 
@@ -566,13 +649,13 @@ object PluginHost {
             FfiVerdict.Allow -> true
             is FfiVerdict.Deny -> false
             is FfiVerdict.RequireUserGrant -> {
-                val granted = authorizationHandler?.onAuthorization(
+                val granted = requestUserGrant(
                     AuthorizationPrompt(
                         AuthorizationPrompt.Kind.Api,
                         callerPluginId ?: targetPluginId,
                         verdict.reason,
                     ),
-                ) == true
+                )
                 if (granted && callerPluginId != null) {
                     handle.recordGrant(callerPluginId, permissionKey, true)
                     grantDb?.pluginGrantDao()?.upsert(
@@ -654,9 +737,19 @@ object PluginHost {
         val application = app ?: return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         val am = application.getSystemService(ActivityManager::class.java) ?: return
-        val nativeCrash = am.getHistoricalProcessExitReasons(null, 0, 5)
-            .any { it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE }
-        if (!nativeCrash) return
+        // 只看本应用进程的 native 崩溃（此前传 null 会把其它应用/无关进程
+        // 的退出也计入），取最近一条。
+        val info = am.getHistoricalProcessExitReasons(application.packageName, 0, 5)
+            .firstOrNull {
+                it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE &&
+                    it.processName == application.packageName
+            } ?: return
+        // 去重：同一次崩溃只上报一次（此前每次启动都重复 emit）。以退出
+        // 时间戳为幂等键，落盘后不再重复。
+        val observed = File(application.filesDir, "native_crash_observed")
+        val stamp = info.timestamp.toString()
+        if (observed.exists() && observed.readText() == stamp) return
+        runCatching { observed.writeText(stamp) }
         val markerDir = File(application.filesDir, "crashed_plugins")
         val culprit = markerDir.listFiles()
             ?.firstOrNull { it.name.endsWith(".crash") }
