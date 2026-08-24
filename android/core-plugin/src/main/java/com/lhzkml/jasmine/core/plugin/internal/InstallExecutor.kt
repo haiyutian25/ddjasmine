@@ -31,6 +31,7 @@ internal class InstallExecutor(private val context: Context) {
 
     companion object {
         const val META_ENTRY_CLASS = "jasmine.plugin.entryClass"
+        const val META_UI_ENTRY_CLASS = "jasmine.plugin.uiEntryClass"
         const val META_DESCRIPTION = "jasmine.plugin.description"
         const val META_CAPABILITIES = "jasmine.plugin.capabilities"
         const val META_ISOLATED = "jasmine.plugin.isolated"
@@ -41,6 +42,7 @@ internal class InstallExecutor(private val context: Context) {
         const val EXEC_DIR = "exec"
         const val PERMISSIONS_NAME = "permissions"
         const val DEPENDENCIES_NAME = "dependencies"
+        const val UI_ENTRY_NAME = "ui_entry"
     }
 
     class Metadata(
@@ -50,6 +52,7 @@ internal class InstallExecutor(private val context: Context) {
         val versionCode: Long,
         val versionName: String,
         val entryClass: String,
+        val uiEntryClass: String?,
         val description: String,
         val capabilities: List<String>,
         val isolated: Boolean,
@@ -99,6 +102,7 @@ internal class InstallExecutor(private val context: Context) {
             versionCode = PackageInfoCompat.getLongVersionCode(info),
             versionName = info.versionName.orEmpty(),
             entryClass = entryClass,
+            uiEntryClass = meta.getString(META_UI_ENTRY_CLASS),
             description = meta.getString(META_DESCRIPTION).orEmpty(),
             capabilities = capabilities,
             isolated = isolated,
@@ -326,6 +330,23 @@ internal class InstallExecutor(private val context: Context) {
         val file = File(pluginDir(pluginId), DEPENDENCIES_NAME)
         if (!file.exists()) return emptyList()
         return file.readLines().filter { it.isNotBlank() }
+    }
+
+    /** Writes the optional UI-side entry class (host-process UI companion). */
+    fun writeUiEntryClass(pluginId: String, uiEntryClass: String?) {
+        val file = File(pluginDir(pluginId), UI_ENTRY_NAME)
+        if (uiEntryClass.isNullOrBlank()) {
+            file.delete()
+        } else {
+            file.writeText(uiEntryClass)
+        }
+    }
+
+    /** Reads the optional UI-side entry class, or null. */
+    fun readUiEntryClass(pluginId: String): String? {
+        val file = File(pluginDir(pluginId), UI_ENTRY_NAME)
+        if (!file.exists()) return null
+        return file.readText().trim().takeIf { it.isNotEmpty() }
     }
 
     /** Parses providers via PackageManager (it does surface these). */

@@ -249,6 +249,7 @@ object PluginHost {
                 payloadFile = install::payloadFile,
                 libDir = install::libDir,
                 readDependencies = install::readDependencies,
+                readUiEntryClass = install::readUiEntryClass,
                 failureCallback = loadFailureCallback,
             )
             lc.onChange = { refreshMenuEntries(lc) }
@@ -360,6 +361,7 @@ object PluginHost {
             val backup = install.placePayload(metadata.packageName, apk, classes)
             install.writePermissions(metadata.packageName, permissions)
             install.writeDependencies(metadata.packageName, metadata.dependencies)
+            install.writeUiEntryClass(metadata.packageName, metadata.uiEntryClass)
             val record = install.buildRecord(
                 metadata, request.signatureDigests, packageSha256, classes, receivers, providers,
                 capabilities,

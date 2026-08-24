@@ -56,10 +56,11 @@ open class PluginHostApplication : Application() {
                 PluginHost.initialize(this@PluginHostApplication, pluginPolicy()) { false }
             } else {
                 // Host process: init and auto-load every enabled plugin
-                // except isolated-process plugins and crash-fused plugins.
+                // except crash-fused plugins. Isolated plugins load their UI
+                // companion here (when declared) and their native entry in the
+                // isolated process.
                 PluginHost.initialize(this@PluginHostApplication, pluginPolicy()) { record ->
-                    !ProcessIsolationManager.isIsolated(record.pluginId) &&
-                        record.pluginId !in crashedPlugins
+                    record.pluginId !in crashedPlugins
                 }
                 onPluginFrameworkReady()()
             }

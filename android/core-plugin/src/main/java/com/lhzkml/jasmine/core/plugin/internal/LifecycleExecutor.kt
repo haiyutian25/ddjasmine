@@ -42,6 +42,7 @@ internal class LifecycleExecutor(
     private val payloadFile: (String) -> File,
     private val libDir: (String) -> File,
     private val readDependencies: (String) -> List<String> = { emptyList() },
+    private val readUiEntryClass: (String) -> String? = { null },
     var failureCallback: LoadFailureCallback? = null,
 ) {
     private val loaded = ConcurrentHashMap<String, LoadedPlugin>()
@@ -75,6 +76,19 @@ internal class LifecycleExecutor(
         if (loaded.containsKey(pluginId)) return
         check(record.enabled) { "插件已禁用: $pluginId" }
 
+        // 宿主进程对 isolated 插件：若有 UI 入口则加载 UI 入口（轻量 UI 类），
+        // 否则跳过（native 逻辑由隔离进程加载）。隔离进程始终加载主入口。
+        val isIsolated =
+            com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager.isIsolated(pluginId)
+        val inIsolatedProcess =
+            com.lhzkml.jasmine.core.plugin.process.ProcessIdentity.isIsolatedProcess(application)
+        val uiEntryClass = readUiEntryClass(pluginId)
+        if (isIsolated && !inIsolatedProcess && uiEntryClass == null) return
+        val effectiveEntry =
+            if (isIsolated && !inIsolatedProcess && uiEntryClass != null) uiEntryClass
+            else record.entryClass
+        val uiOnly = isIsolated && !inIsolatedProcess && uiEntryClass != null
+
         // Declared-dependency preload: load not-yet-loaded dependencies first
         // (dependency order), then record the edges so dependent-ordered
         // unload and chained restart work. A missing/uninstalled dependency
@@ -104,7 +118,7 @@ internal class LifecycleExecutor(
             loadedPlugins = { loaded.mapValues { it.value.classLoader } },
         )
         try {
-            val entry = instantiateEntry(classLoader, record.entryClass, pluginId)
+            val entry = instantiateEntry(classLoader, effectiveEntry, pluginId)
             val resources = PluginResourcesLoader.load(
                 application,
                 payloadFile(pluginId).absolutePath,
@@ -116,10 +130,11 @@ internal class LifecycleExecutor(
                 resources = resources,
             )
             entry.onLoad(context)
-            entry.onNativeReady(context)
+            if (!uiOnly) entry.onNativeReady(context)
             loaded[pluginId] = LoadedPlugin(record, classLoader, entry, resources)
             serviceTables[pluginId] = entry.services
-            staticActions[pluginId] = registerComponents(record)
+            // UI 入口不注册 receivers/providers（这些组件属于主入口所在进程）。
+            staticActions[pluginId] = if (uiOnly) emptySet() else registerComponents(record)
             onChange?.invoke()
         } catch (e: Throwable) {
             loaded.remove(pluginId)
