@@ -35,3 +35,5 @@ android/core-plugin/src/main/java/com/lhzkml/jasmine/core/plugin/rust/
 # 第三方插件化框架研究源码（只读参考，不参与构建）
 ComboLite/
 OpenMinis/
+kotlin-sdk/
+调试日志/

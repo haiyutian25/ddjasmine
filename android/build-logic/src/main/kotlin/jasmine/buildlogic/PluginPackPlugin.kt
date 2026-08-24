@@ -3,6 +3,7 @@ package jasmine.buildlogic
 import org.gradle.api.DefaultTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
@@ -55,9 +56,15 @@ abstract class PluginPackExtension {
     @get:Input
     abstract val keyPassword: Property<String>
 
+    /** 宿主 app 模块路径（如 ":app"）。构建时自动读取其 releaseRuntimeClasspath，
+     *  把宿主已提供的依赖 group 自动排除出插件 DEX，插件无需手写 excludeGroups。 */
+    @get:Input
+    abstract val hostProject: Property<String>
+
     init {
         packageIdSlot.convention(1)
         excludeGroups.convention(listOf("org.jetbrains.kotlin", "androidx"))
+        hostProject.convention(":app")
         keystorePath.convention(
             File(System.getProperty("user.home"), ".android/debug.keystore").absolutePath,
         )
@@ -304,10 +311,15 @@ class PluginPackPlugin : Plugin<Project> {
                         val runtimeClasspath =
                             project.configurations.getByName("releaseRuntimeClasspath")
                         val excluded = extension.excludeGroups.get()
+                        val hostGroups = hostProvidedGroups(project, extension.hostProject.get())
                         runtimeClasspath.resolvedConfiguration.resolvedArtifacts
                             .filter { art ->
                                 val group = art.moduleVersion.id.group
-                                excluded.none { group == it || group.startsWith("$it.") }
+                                val manuallyExcluded =
+                                    excluded.any { group == it || group.startsWith("$it.") }
+                                val hostProvided =
+                                    hostGroups.any { group == it || group.startsWith("$it.") }
+                                !manuallyExcluded && !hostProvided
                             }
                             .map { it.file }
                     },
@@ -323,3 +335,30 @@ class PluginPackPlugin : Plugin<Project> {
         }
     }
 }
+
+/**
+ * 读取宿主 app 模块的 releaseRuntimeClasspath，返回其全部依赖 group，
+ * 用于自动排除"宿主已提供"的依赖。插件只需写 implementation，框架据此
+ * 决定哪些打进 DEX、哪些从宿主 parent-first 解析。
+ */
+private fun hostProvidedGroups(project: Project, hostProjectPath: String): Set<String> =
+    runCatching {
+        val host = project.rootProject.project(hostProjectPath)
+        // 用 resolutionResult（仅依赖图解析，不解析产物文件）收集宿主全部传递
+        // 依赖的 group，避免 Android library project 依赖因 artifactType 属性
+        // 缺失而 variant 歧义；只取外部模块，跳过 project 依赖（core-*/feature-*）。
+        val groups = host.configurations.getByName("releaseRuntimeClasspath")
+            .incoming.resolutionResult.allComponents
+            .mapNotNull { (it.id as? ModuleComponentIdentifier)?.group }
+            .toSet()
+        project.logger.lifecycle(
+            "[plugin-pack] 宿主 [$hostProjectPath] 已提供依赖 group (${groups.size}): " +
+                groups.sorted().joinToString(", "),
+        )
+        groups
+    }.onFailure { e ->
+        val chain = generateSequence(e as Throwable?) { it.cause }
+            .map { it.message ?: it::class.simpleName.orEmpty() }
+            .joinToString("  <--  ")
+        project.logger.lifecycle("[plugin-pack] 读取宿主依赖失败: $chain")
+    }.getOrDefault(emptySet())

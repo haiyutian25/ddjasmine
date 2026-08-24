@@ -60,33 +60,23 @@ kotlin {
 }
 
 // Packaging: plugin package-id 0x84 (slot 4, host keeps 0x7f).
+// excludeGroups 无需手写：PluginPackPlugin 自动读取宿主 app 的
+// releaseRuntimeClasspath，宿主已提供的依赖（Ktor/OkHttp/Okio/Compose）
+// 自动排除出插件 DEX，运行时 parent-first 从宿主解析。
 pluginPack {
     packageIdSlot.set(4)
-    // 宿主 core-agent 已改用 Ktor（OkHttp engine），Ktor 及其底层
-    // OkHttp/Okio 都在宿主 APK。这里把 MCP SDK 传递进来的 Ktor/OkHttp/Okio
-    // 从插件 DEX 排除，运行时从宿主解析，避免插件重复打包 Ktor。
-    excludeGroups.add("io.ktor")
-    excludeGroups.add("com.squareup.okhttp3")
-    excludeGroups.add("com.squareup.okio")
 }
 
 dependencies {
-    compileOnly(project(":core-plugin"))
-    compileOnly(libs.androidx.activity)
+    // 宿主 API 聚合门面：compileOnly + host-api 的 api 传递，编译期即可 import
+    // 宿主 PluginHost / 主题 / Compose / Ktor 等全部共享 API，运行时 parent-first
+    // 从宿主解析。用 compileOnly 而非 implementation：不让 project 依赖进入 runtime
+    // classpath，避免 PluginPackPlugin resolve 时的 variant 歧义。
+    compileOnly(project(":host-api"))
 
-    // MCP 官方 SDK 打进插件 DEX；Ktor 由宿主 core-agent 提供，compileOnly
-    // 声明从宿主解析（excludeGroups 进一步阻止其打进插件 DEX）。
+    // 宿主没有的官方 MCP SDK，打进插件 DEX；其传递的 Ktor/OkHttp/Okio 等
+    // 宿主已提供，由 PluginPackPlugin 自动排除，无需任何 excludeGroups。
     implementation(libs.mcp.sdk.client)
-    compileOnly(libs.ktor.client.core)
-    compileOnly(libs.ktor.client.okhttp)
-
-    // 插件 UI 在运行时经父 ClassLoader 从宿主解析，故 compileOnly
-    val composeBom = platform(libs.androidx.compose.bom)
-    compileOnly(composeBom)
-    compileOnly(libs.androidx.compose.ui)
-    compileOnly(libs.androidx.compose.foundation)
-    compileOnly(libs.androidx.compose.material3)
-    compileOnly(libs.androidx.compose.material.icons.core)
 
     ksp(project(":core-plugin-ksp"))
 }
