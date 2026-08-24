@@ -3,6 +3,9 @@
     android:versionCode="1"
     android:versionName="1.0">
 
+    <!-- 插件自主声明所需权限，构建时由 app 的 generatePluginPermissions 合并进宿主 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:label="MCP 插件">
         <!-- Runtime contract: entry class + description read at install -->

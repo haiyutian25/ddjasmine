@@ -85,6 +85,13 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    sourceSets {
+        getByName("main") {
+            // 追加插件权限合并片段（generatePluginPermissions 生成）
+            manifest.srcFile("src/main/plugin-permissions.xml")
+        }
+    }
 }
 
 // Enable room auto-migrations
@@ -96,6 +103,49 @@ ksp {
 // 插件分发交给 jasmine.plugin-dev（见上方 pluginDev 块）；代理组件由
 // :core-plugin 库 manifest 合并，无需在此注册。
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 插件权限自动合并：插件在自己的 manifest 声明 uses-permission，构建时
+// 由此 task 扫描所有插件模块的 manifest 并合并进宿主（无需宿主/框架预声明
+// 权限池）。插件自主声明、构建期自动生效。
+// ---------------------------------------------------------------------------
+val pluginModules = listOf(":sample-plugin", ":sample-guide", ":sample-example", ":sample-mcp")
+
+val generatePluginPermissions by tasks.registering {
+    group = "build"
+    description = "Scans plugin manifests and merges their uses-permission into the host"
+    val manifestPaths = pluginModules.map {
+        project.rootProject.file("${it.removePrefix(":")}/src/main/AndroidManifest.xml").absolutePath
+    }
+    val outPath = project.file("src/main/plugin-permissions.xml").absolutePath
+    inputs.files(manifestPaths)
+    outputs.file(project.file("src/main/plugin-permissions.xml"))
+    doLast {
+        val permissions = linkedSetOf<String>()
+        for (path in manifestPaths) {
+            val manifestFile = File(path)
+            if (!manifestFile.exists()) continue
+            Regex("<uses-permission\\s+android:name=\"([^\"]+)\"").findAll(manifestFile.readText()).forEach { m ->
+                permissions += m.groupValues[1]
+            }
+        }
+        val xml = buildString {
+            appendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
+            appendLine("<!-- 自动生成：generatePluginPermissions 从插件 manifest 收集，勿手改 -->")
+            appendLine("<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">")
+            permissions.sorted().forEach { appendLine("    <uses-permission android:name=\"$it\" />") }
+            appendLine("</manifest>")
+        }
+        val out = File(outPath)
+        out.parentFile?.mkdirs()
+        out.writeText(xml)
+        logger.lifecycle("[permissions] 合并插件权限 (${permissions.size}): ${permissions.sorted()}")
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(generatePluginPermissions)
+}
 
 // ---------------------------------------------------------------------------
 // Rust native library pipeline: cross-compile the UniFFI cdylib for all four
