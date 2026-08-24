@@ -44,6 +44,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- AlarmManager 触发的插件后台任务接收器（PluginScheduler） -->
+        <receiver
+            android:name=".process.PluginAlarmReceiver"
+            android:exported="false" />
+
         <!-- Centralized content-provider proxy -->
         <provider
             android:name=".proxy.HostProvider"
@@ -104,6 +109,56 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="插件前台服务代理" />
         </service>
+        <service android:name=".proxy.HostService11" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService12" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService13" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService14" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService15" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService16" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService17" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService18" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService19" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
+        <service android:name=".proxy.HostService20" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件前台服务代理" />
+        </service>
 
         <!-- Isolated-process service pool: runs services of plugins placed in
              the isolated process, so bind/start cross the boundary natively. -->
@@ -126,6 +181,30 @@
                 android:value="插件隔离进程服务代理" />
         </service>
         <service android:name=".proxy.IsolatedHostService4" android:exported="false"
+            android:process=":plugin_isolated"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件隔离进程服务代理" />
+        </service>
+        <service android:name=".proxy.IsolatedHostService5" android:exported="false"
+            android:process=":plugin_isolated"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件隔离进程服务代理" />
+        </service>
+        <service android:name=".proxy.IsolatedHostService6" android:exported="false"
+            android:process=":plugin_isolated"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件隔离进程服务代理" />
+        </service>
+        <service android:name=".proxy.IsolatedHostService7" android:exported="false"
+            android:process=":plugin_isolated"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="插件隔离进程服务代理" />
+        </service>
+        <service android:name=".proxy.IsolatedHostService8" android:exported="false"
             android:process=":plugin_isolated"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"

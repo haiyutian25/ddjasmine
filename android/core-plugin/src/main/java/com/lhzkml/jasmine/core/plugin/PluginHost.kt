@@ -26,7 +26,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /** Signature trust policy for installs, mirroring the charter's strategy. */
 enum class SignaturePolicy { Strict, UserGrant, Insecure }
@@ -55,6 +59,14 @@ data class AuthorizationPrompt(
     enum class Kind { Install, Api }
 }
 
+/** Persisted grant entry: (plugin, permission key) → granted. */
+@Serializable
+private data class PersistedGrant(
+    val pluginId: String,
+    val permissionKey: String,
+    val granted: Boolean,
+)
+
 /** Host-provided authorization UI hook (dialog, server approval, …). */
 fun interface AuthorizationHandler {
     suspend fun onAuthorization(prompt: AuthorizationPrompt): Boolean
@@ -72,6 +84,11 @@ object PluginHost {
     private var executor: InstallExecutor? = null
     private var lifecycle: LifecycleExecutor? = null
     private var app: Application? = null
+
+    /** Kotlin 侧持久化的授权缓存：key = "pluginId\u0000permissionKey" → granted。
+     *  Rust 核心的 grants 是会话级，这里落盘并在启动时回放，实现跨进程/重启保留。 */
+    private val persistedGrants = ConcurrentHashMap<String, Boolean>()
+    private val grantJson = Json { ignoreUnknownKeys = true }
 
     /** Completes once [initialize] finishes; [awaitReady] suspends on it. */
     private val ready = CompletableDeferred<Unit>()
@@ -239,6 +256,14 @@ object PluginHost {
             executor = install
             lifecycle = lc
             app = application
+            // 回放持久化的授权到 Rust 核心（Rust 侧 grants 是会话级缓存）。
+            loadPersistedGrants()
+            persistedGrants.forEach { (k, granted) ->
+                if (granted) {
+                    val sep = k.indexOf('\u0000')
+                    handle.recordGrant(k.substring(0, sep), k.substring(sep + 1), true)
+                }
+            }
             lc.loadEnabled(handle.allRecords().filter(loadFilter))
             refreshMenuEntries(lc)
             // The host serves the named-capability offload channel; the
@@ -407,6 +432,7 @@ object PluginHost {
             val record = requireCore().commitUninstall(pluginId)
             File(record.installPath).deleteRecursively()
             clearPluginPrefs(pluginId)
+            clearPluginGrants(pluginId)
             emit(PluginEvent.Uninstalled(pluginId))
             record
         }
@@ -421,6 +447,48 @@ object PluginHost {
         prefsDir.listFiles()
             ?.filter { it.name.startsWith(prefix) && it.name.endsWith(".xml") }
             ?.forEach { it.delete() }
+    }
+
+    // --- grant persistence -------------------------------------------------
+
+    private fun grantsFile(): File? = app?.let { File(it.filesDir, "plugin_grants.json") }
+
+    private fun grantKey(pluginId: String, permissionKey: String): String =
+        "$pluginId\u0000$permissionKey"
+
+    /** Loads persisted grants into the Kotlin-side cache. */
+    private fun loadPersistedGrants() {
+        val file = grantsFile() ?: return
+        if (!file.exists()) return
+        runCatching {
+            grantJson.decodeFromString<List<PersistedGrant>>(file.readText())
+        }.getOrDefault(emptyList()).forEach { g ->
+            persistedGrants[grantKey(g.pluginId, g.permissionKey)] = g.granted
+        }
+    }
+
+    /** Persists a grant and rewrites the grant file. */
+    private fun persistGrant(pluginId: String, permissionKey: String, granted: Boolean) {
+        persistedGrants[grantKey(pluginId, permissionKey)] = granted
+        rewriteGrantFile()
+    }
+
+    /** Drops a plugin's persisted grants (uninstall). */
+    private fun clearPluginGrants(pluginId: String) {
+        val prefix = "$pluginId\u0000"
+        persistedGrants.keys.removeIf { it.startsWith(prefix) }
+        rewriteGrantFile()
+    }
+
+    private fun rewriteGrantFile() {
+        val file = grantsFile() ?: return
+        runCatching {
+            val list = persistedGrants.map { (k, v) ->
+                val sep = k.indexOf('\u0000')
+                PersistedGrant(k.substring(0, sep), k.substring(sep + 1), v)
+            }
+            file.writeText(grantJson.encodeToString(list))
+        }
     }
 
     /**
@@ -537,6 +605,7 @@ object PluginHost {
                 ) == true
                 if (granted && callerPluginId != null) {
                     handle.recordGrant(callerPluginId, permissionKey, true)
+                    persistGrant(callerPluginId, permissionKey, true)
                 }
                 granted
             }
