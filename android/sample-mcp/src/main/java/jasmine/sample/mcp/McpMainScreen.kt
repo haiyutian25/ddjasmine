@@ -1,17 +1,25 @@
 package jasmine.sample.mcp
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -28,11 +36,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,7 +48,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.GetPromptResult
 import io.modelcontextprotocol.kotlin.sdk.types.Prompt
@@ -171,10 +184,6 @@ fun McpMainScreen(repository: McpRepository, clientManager: McpClientManager) {
             config = repository.find(s.name),
             connected = s.name in connected,
             clientManager = clientManager,
-            onConnect = {
-                clientManager.connect(repository.find(s.name)!!)
-                connected = connected + s.name
-            },
             onDisconnect = {
                 clientManager.disconnect(s.name)
                 connected = connected - s.name
@@ -296,6 +305,7 @@ private fun ServerListScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ServerCard(
     server: McpServerConfig,
@@ -305,51 +315,92 @@ private fun ServerCard(
     onDelete: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    val density = LocalDensity.current
+    val actionWidthPx = with(density) { 200.dp.toPx() }
+    val offsetX = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // 左滑后露出的操作区（编辑 / 删除 / 禁用）
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(server.name, style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = when (server.transportType) {
-                            TransportType.STREAMABLE_HTTP -> "Streamable HTTP"
-                            TransportType.SSE -> "SSE"
-                            TransportType.STDIO -> "STDIO"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    if (connected) {
-                        Text(
-                            "已连接",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.tertiary,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = when (server.transportType) {
-                        TransportType.STDIO ->
-                            listOfNotNull(server.command, server.args.joinToString(" ").ifBlank { null })
-                                .joinToString(" ")
-
-                        else -> server.url.orEmpty()
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Switch(checked = server.enabled, onCheckedChange = onToggleEnabled)
             IconButton(onClick = onEdit) {
                 Icon(Icons.Filled.Edit, contentDescription = "编辑")
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Filled.Delete, contentDescription = "删除")
+            }
+            OutlinedButton(onClick = { onToggleEnabled(!server.enabled) }) {
+                Text(if (server.enabled) "禁用" else "启用")
+            }
+        }
+
+        // 前景：卡片，点击进入详情；左滑露出操作区
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            val target = if (offsetX.value < -actionWidthPx / 2f) -actionWidthPx else 0f
+                            scope.launch { offsetX.animateTo(target) }
+                        },
+                        onDragCancel = {
+                            scope.launch { offsetX.animateTo(0f) }
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            val newX = (offsetX.value + dragAmount).coerceIn(-actionWidthPx, 0f)
+                            scope.launch { offsetX.snapTo(newX) }
+                        },
+                    )
+                },
+            onClick = onOpen,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 连接状态：绿色圆点
+                if (connected) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(Color(0xFF4CAF50), CircleShape),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(server.name, style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = when (server.transportType) {
+                                TransportType.STREAMABLE_HTTP -> "Streamable HTTP"
+                                TransportType.SSE -> "SSE"
+                                TransportType.STDIO -> "STDIO"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = when (server.transportType) {
+                            TransportType.STDIO ->
+                                listOfNotNull(server.command, server.args.joinToString(" ").ifBlank { null })
+                                    .joinToString(" ")
+
+                            else -> server.url.orEmpty()
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
     }
@@ -376,7 +427,6 @@ private fun ServerEditScreen(
         mutableStateOf(initial?.headers?.entries?.joinToString("\n") { "${it.key}: ${it.value}" } ?: "")
     }
     var accessTokenText by remember { mutableStateOf(initial?.accessToken ?: "") }
-    var enabled by remember { mutableStateOf(initial?.enabled ?: true) }
 
     Scaffold(
         topBar = {
@@ -459,12 +509,6 @@ private fun ServerEditScreen(
                 )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("启用", style = MaterialTheme.typography.bodyLarge)
-                Spacer(Modifier.weight(1f))
-                Switch(checked = enabled, onCheckedChange = { enabled = it })
-            }
-
             Spacer(Modifier.weight(1f))
 
             Row(
@@ -489,7 +533,7 @@ private fun ServerEditScreen(
                                     if (i > 0) line.substring(0, i).trim() to line.substring(i + 1).trim() else null
                                 }.toMap(),
                                 accessToken = accessTokenText.trim().ifBlank { null },
-                                enabled = enabled,
+                                enabled = initial?.enabled ?: true,
                                 transportType = transportType,
                             ),
                         )
@@ -508,7 +552,6 @@ private fun ServerDetailScreen(
     config: McpServerConfig?,
     connected: Boolean,
     clientManager: McpClientManager,
-    onConnect: suspend () -> Unit,
     onDisconnect: suspend () -> Unit,
     onPing: suspend () -> Unit,
     onBack: () -> Unit,
@@ -528,6 +571,8 @@ private fun ServerDetailScreen(
     var resourceTarget by remember { mutableStateOf<Resource?>(null) }
     var resourceContent by remember { mutableStateOf<String?>(null) }
     var toolsError by remember { mutableStateOf<String?>(null) }
+    var promptsError by remember { mutableStateOf<String?>(null) }
+    var resourcesError by remember { mutableStateOf<String?>(null) }
 
     fun run(block: suspend () -> Unit) {
         scope.launch {
@@ -543,42 +588,39 @@ private fun ServerDetailScreen(
         }
     }
 
-    // 连接后一次性加载三类内容；list* 各自容错（server 可能不支持某类）。
-    fun connectAndLoad() = scope.launch {
-        loading = true
-        localError = null
-        try {
-            onConnect()
-        } catch (t: Throwable) {
-            localError = "连接失败：${t.message}"
+    // 直接拉取三类数据；获取失败时把原因记录到对应错误状态展示。
+    fun loadData() {
+        scope.launch {
+            loading = true
+            toolsError = null
+            promptsError = null
+            resourcesError = null
+            tools = try {
+                clientManager.listTools(name)
+            } catch (t: Throwable) {
+                toolsError = "工具加载失败：${t.message}"
+                emptyList()
+            }
+            prompts = try {
+                clientManager.listPrompts(name)
+            } catch (t: Throwable) {
+                promptsError = "Prompts 加载失败：${t.message}"
+                emptyList()
+            }
+            resources = try {
+                clientManager.listResources(name)
+            } catch (t: Throwable) {
+                resourcesError = "Resources 加载失败：${t.message}"
+                emptyList()
+            }
             loading = false
-            return@launch
         }
-        toolsError = null
-        tools = try {
-            clientManager.listTools(name)
-        } catch (t: Throwable) {
-            toolsError = "工具加载失败：${t.message}"
-            emptyList()
-        }
-        prompts = try { clientManager.listPrompts(name) } catch (_: Throwable) { emptyList() }
-        resources = try { clientManager.listResources(name) } catch (_: Throwable) { emptyList() }
-        loading = false
     }
 
-    fun refreshAll() = scope.launch {
-        loading = true
-        toolsError = null
-        tools = try {
-            clientManager.listTools(name)
-        } catch (t: Throwable) {
-            toolsError = "工具加载失败：${t.message}"
-            emptyList()
-        }
-        prompts = try { clientManager.listPrompts(name) } catch (_: Throwable) { emptyList() }
-        resources = try { clientManager.listResources(name) } catch (_: Throwable) { emptyList() }
-        loading = false
-    }
+    // 进入详情页直接获取数据，不判断连接状态。
+    LaunchedEffect(name) { loadData() }
+
+    fun refreshAll() = loadData()
 
     localError?.let { message ->
         AlertDialog(
@@ -623,9 +665,7 @@ private fun ServerDetailScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (!connected) {
-                    Button(onClick = { connectAndLoad() }, enabled = !loading) { Text("连接") }
-                } else {
+                if (connected) {
                     OutlinedButton(
                         onClick = {
                             run {
@@ -656,18 +696,18 @@ private fun ServerDetailScreen(
             Spacer(Modifier.height(12.dp))
 
             when (tab) {
-                0 -> ToolList(tools = tools, connected = connected, toolsError = toolsError, onCall = { tool ->
+                0 -> ToolList(tools = tools, toolsError = toolsError, onCall = { tool ->
                     callTarget = tool
                     callResult = null
                     callArgs = "{}"
                 })
 
-                1 -> PromptList(prompts = prompts, connected = connected, onView = { prompt ->
+                1 -> PromptList(prompts = prompts, promptsError = promptsError, onView = { prompt ->
                     promptTarget = prompt
                     promptContent = null
                 })
 
-                else -> ResourceList(resources = resources, connected = connected, onRead = { resource ->
+                else -> ResourceList(resources = resources, resourcesError = resourcesError, onRead = { resource ->
                     resourceTarget = resource
                     resourceContent = null
                 })
@@ -787,13 +827,13 @@ private fun ServerDetailScreen(
 }
 
 @Composable
-private fun ToolList(tools: List<Tool>, connected: Boolean, toolsError: String?, onCall: (Tool) -> Unit) {
+private fun ToolList(tools: List<Tool>, toolsError: String?, onCall: (Tool) -> Unit) {
     if (toolsError != null) {
         Text(toolsError, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
         return
     }
     if (tools.isEmpty()) {
-        Text(if (connected) "暂无工具" else "连接后列出工具", style = MaterialTheme.typography.bodyMedium)
+        Text("暂无工具", style = MaterialTheme.typography.bodyMedium)
         return
     }
     Text("工具（${tools.size}）", style = MaterialTheme.typography.titleMedium)
@@ -817,9 +857,13 @@ private fun ToolList(tools: List<Tool>, connected: Boolean, toolsError: String?,
 }
 
 @Composable
-private fun PromptList(prompts: List<Prompt>, connected: Boolean, onView: (Prompt) -> Unit) {
+private fun PromptList(prompts: List<Prompt>, promptsError: String?, onView: (Prompt) -> Unit) {
+    if (promptsError != null) {
+        Text(promptsError, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+        return
+    }
     if (prompts.isEmpty()) {
-        Text(if (connected) "暂无 Prompts" else "连接后列出 Prompts", style = MaterialTheme.typography.bodyMedium)
+        Text("暂无 Prompts", style = MaterialTheme.typography.bodyMedium)
         return
     }
     Text("Prompts（${prompts.size}）", style = MaterialTheme.typography.titleMedium)
@@ -843,9 +887,13 @@ private fun PromptList(prompts: List<Prompt>, connected: Boolean, onView: (Promp
 }
 
 @Composable
-private fun ResourceList(resources: List<Resource>, connected: Boolean, onRead: (Resource) -> Unit) {
+private fun ResourceList(resources: List<Resource>, resourcesError: String?, onRead: (Resource) -> Unit) {
+    if (resourcesError != null) {
+        Text(resourcesError, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+        return
+    }
     if (resources.isEmpty()) {
-        Text(if (connected) "暂无 Resources" else "连接后列出 Resources", style = MaterialTheme.typography.bodyMedium)
+        Text("暂无 Resources", style = MaterialTheme.typography.bodyMedium)
         return
     }
     Text("Resources（${resources.size}）", style = MaterialTheme.typography.titleMedium)

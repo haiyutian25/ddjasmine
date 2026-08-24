@@ -102,7 +102,8 @@ class McpClientManager {
 
     /** 列出已连接 server 的工具。 */
     suspend fun listTools(name: String): List<Tool> = withContext(Dispatchers.IO) {
-        clients[name]?.listTools()?.tools ?: emptyList()
+        val client = clients[name] ?: throw IllegalStateException("server 未连接：$name")
+        client.listTools().tools
     }
 
     /** 调用工具，返回 SDK 结果对象（UI 层负责提取文本）。 */
@@ -119,7 +120,8 @@ class McpClientManager {
 
     /** 列出 prompts。 */
     suspend fun listPrompts(name: String): List<Prompt> = withContext(Dispatchers.IO) {
-        clients[name]?.listPrompts()?.prompts ?: emptyList()
+        val client = clients[name] ?: throw IllegalStateException("server 未连接：$name")
+        client.listPrompts().prompts
     }
 
     /** 获取指定 prompt 的内容。 */
@@ -132,7 +134,8 @@ class McpClientManager {
 
     /** 列出 resources。 */
     suspend fun listResources(name: String): List<Resource> = withContext(Dispatchers.IO) {
-        clients[name]?.listResources()?.resources ?: emptyList()
+        val client = clients[name] ?: throw IllegalStateException("server 未连接：$name")
+        client.listResources().resources
     }
 
     /** 读取指定 URI 的资源内容。 */
