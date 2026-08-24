@@ -312,9 +312,17 @@ class PluginPackPlugin : Plugin<Project> {
                             project.configurations.getByName("releaseRuntimeClasspath")
                         val excluded = extension.excludeGroups.get()
                         val hostGroups = hostProvidedGroups(project, extension.hostProject.get())
-                        runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+                        // 只取外部模块的 jar：componentFilter 在 variant 匹配前过滤掉
+                        // project 依赖（core-plugin 等），避免 Android library project 依赖
+                        // 的 variant 歧义；project 依赖的类由宿主提供、运行时 parent-first
+                        // 解析，不进插件 DEX。
+                        runtimeClasspath.incoming.artifactView {
+                            componentFilter { it is ModuleComponentIdentifier }
+                        }.artifacts.artifacts
                             .filter { art ->
-                                val group = art.moduleVersion.id.group
+                                val group =
+                                    (art.id.componentIdentifier as? ModuleComponentIdentifier)
+                                        ?.group ?: return@filter false
                                 val manuallyExcluded =
                                     excluded.any { group == it || group.startsWith("$it.") }
                                 val hostProvided =

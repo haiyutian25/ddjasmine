@@ -68,15 +68,20 @@ pluginPack {
 }
 
 dependencies {
-    // 框架内置的插件开发 API 门面：core-plugin 已用 api 传递宿主主题 / Compose /
-    // Ktor 等全部共享 API，compileOnly 一个依赖即可 import，运行时 parent-first
-    // 从宿主解析。用 compileOnly 而非 implementation：不让 project 依赖进入 runtime
-    // classpath，避免 PluginPackPlugin resolve 时的 variant 歧义。
-    compileOnly(project(":core-plugin"))
-
-    // 宿主没有的官方 MCP SDK，打进插件 DEX；其传递的 Ktor/OkHttp/Okio 等
-    // 宿主已提供，由 PluginPackPlugin 自动排除，无需任何 excludeGroups。
+    // 全部用 implementation 正常声明，无需手动区分 compileOnly / excludeGroups：
+    // PluginPackPlugin 会自动识别宿主已提供的依赖（框架 API / Ktor / Compose 等）
+    // 并从插件 DEX 去重、运行时直接使用宿主；宿主没有的（MCP SDK）打进 DEX。
+    implementation(project(":core-plugin"))
     implementation(libs.mcp.sdk.client)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+
+    val composeBom = platform(libs.androidx.compose.bom)
+    implementation(composeBom)
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
 
     ksp(project(":core-plugin-ksp"))
 }
