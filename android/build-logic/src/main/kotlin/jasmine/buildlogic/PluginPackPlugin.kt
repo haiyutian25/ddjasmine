@@ -19,6 +19,7 @@ import org.gradle.kotlin.dsl.register
 import java.io.File
 import java.io.FileOutputStream
 import javax.tools.ToolProvider
+import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -274,6 +275,7 @@ abstract class PluginPackagingTask : DefaultTask() {
 
     private fun appendToZip(zipFile: File, entry: File, entryName: String) {
         if (!entry.exists()) return
+        val bytes = entry.readBytes()
         val existing = mutableListOf<Pair<ZipEntry, ByteArray>>()
         ZipFile(zipFile).use { zip ->
             zip.entries().asSequence().forEach { e ->
@@ -281,13 +283,21 @@ abstract class PluginPackagingTask : DefaultTask() {
             }
         }
         ZipOutputStream(FileOutputStream(zipFile)).use { out ->
-            for ((ze, bytes) in existing) {
+            for ((ze, existingBytes) in existing) {
                 out.putNextEntry(ze)
-                out.write(bytes)
+                out.write(existingBytes)
                 out.closeEntry()
             }
-            out.putNextEntry(ZipEntry(entryName))
-            out.write(entry.readBytes())
+            val ze = ZipEntry(entryName)
+            // .so 必须未压缩（STORED），否则 Android 无法从 APK 直接 mmap 加载
+            //（in-APK fallback 会失败）。其余资源用默认压缩。
+            if (entryName.endsWith(".so")) {
+                ze.method = ZipEntry.STORED
+                ze.size = bytes.size.toLong()
+                ze.crc = CRC32().apply { update(bytes) }.value
+            }
+            out.putNextEntry(ze)
+            out.write(bytes)
             out.closeEntry()
         }
     }

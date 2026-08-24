@@ -1,8 +1,11 @@
 package com.lhzkml.jasmine.core.plugin
 
+import android.app.ActivityManager
 import android.app.Application
+import android.app.ApplicationExitInfo
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.lhzkml.jasmine.core.plugin.internal.InstallException
@@ -705,6 +708,31 @@ object PluginHost {
     /** PermissionRequestActivity 回传授权结果。 */
     internal fun completePermissionRequest(requestCode: Int, granted: Boolean) {
         permissionRequests.remove(requestCode)?.complete(granted)
+    }
+
+    /**
+     * 观测上次进程是否因 native 崩溃（SIGSEGV 等）退出——Java 的
+     * CrashHook 无法捕获 native 崩溃，这里用 ApplicationExitInfo（Android 11+）
+     * 补齐，并结合崩溃标记归因到插件、emit Crash 事件。
+     */
+    fun observePreviousNativeCrash() {
+        val application = app ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val am = application.getSystemService(ActivityManager::class.java) ?: return
+        val nativeCrash = am.getHistoricalProcessExitReasons(null, 0, 5)
+            .any { it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE }
+        if (!nativeCrash) return
+        val markerDir = File(application.filesDir, "crashed_plugins")
+        val culprit = markerDir.listFiles()
+            ?.firstOrNull { it.name.endsWith(".crash") }
+            ?.name?.removeSuffix(".crash")
+        emit(
+            PluginEvent.Crash(
+                pluginId = culprit ?: "",
+                kind = "NATIVE",
+                blameAttributed = culprit != null,
+            ),
+        )
     }
 
     private val permissionRequests = ConcurrentHashMap<Int, CompletableDeferred<Boolean>>()

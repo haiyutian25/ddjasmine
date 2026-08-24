@@ -63,6 +63,8 @@ open class PluginHostApplication : Application() {
                     record.pluginId !in crashedPlugins
                 }
                 onPluginFrameworkReady()()
+                // 观测上次 native 崩溃（Java handler 无法捕获的场景）
+                PluginHost.observePreviousNativeCrash()
             }
         }
     }
