@@ -165,6 +165,24 @@ object PluginHost {
     fun execBridge(): com.lhzkml.jasmine.core.plugin.proxy.ExecBridge =
         com.lhzkml.jasmine.core.plugin.proxy.ExecBridge(requireApp())
 
+    /** Lazily-created supervisor backing [childProcessSupervisor]. */
+    @Volatile
+    private var childSupervisor: com.lhzkml.jasmine.core.plugin.proxy.ChildProcessSupervisor? = null
+
+    /**
+     * Subprocess lifecycle supervisor (§5.3): managed children started via
+     * [execBridge]'s `runViaLinker`, with output pumping, death callbacks and
+     * opt-in restart. Children are reaped when the owning plugin unloads or
+     * uninstalls.
+     */
+    fun childProcessSupervisor(): com.lhzkml.jasmine.core.plugin.proxy.ChildProcessSupervisor {
+        childSupervisor?.let { return it }
+        return synchronized(this) {
+            childSupervisor ?: com.lhzkml.jasmine.core.plugin.proxy.ChildProcessSupervisor(execBridge())
+                .also { childSupervisor = it }
+        }
+    }
+
     /**
      * Registers a named host capability invocable from any process by command
      * name (OpenMinis `native_offload`-style). See
@@ -513,6 +531,8 @@ object PluginHost {
 
     /** Unloads (when loaded), removes files, and commits the uninstall. */
     suspend fun uninstallPlugin(pluginId: String): FfiPluginRecord = withContext(Dispatchers.IO) {
+        // 卸载路径不经过 unloadPlugin，这里同样要回收该插件的子进程（§5.3）。
+        childSupervisor?.stopAll(pluginId)
         mutex.withLock {
             val lc = requireLifecycle()
             if (lc.isLoaded(pluginId)) lc.unload(pluginId)
@@ -566,6 +586,8 @@ object PluginHost {
 
     /** Unloads a running plugin; the registry entry stays. */
     suspend fun unloadPlugin(pluginId: String): Unit = withContext(Dispatchers.IO) {
+        // 先回收该插件经子进程监督器启动的子进程（§5.3），避免卸载后孤儿进程残留。
+        childSupervisor?.stopAll(pluginId)
         mutex.withLock { requireLifecycle().unload(pluginId) }
         emit(PluginEvent.Unloaded(pluginId))
     }
