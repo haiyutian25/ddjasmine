@@ -78,6 +78,75 @@ class ExecBridge(private val application: Application) {
     }
 
     /**
+     * Runs a plugin binary via **system_linker_exec** (see §4.6 of the PRoot
+     * analysis): forks a child that `execve`s the system dynamic linker with
+     * the plugin binary as its argument; the linker then mmap-loads and runs
+     * it. This is the Android 10+ W^X-safe way to execute a
+     * dynamically-linked binary that lives in the plugin's `app_data_file`
+     * directory (direct `execve` of which SELinux denies). Unlike [runNative]
+     * (in-process dlopen, synchronous, no handle), this returns a real child
+     * [Process] with stdin/stdout/stderr pipes and full lifecycle control —
+     * the proot-runner primitive proot needs (it must be a separate traced
+     * process). Gated on the `EXEC` capability.
+     *
+     * @param relPath binary path relative to the plugin dir (e.g.
+     *   `lib/arm64-v8a/libproot.so` or `exec/proot`); traversal-safe.
+     * @param env extra environment (e.g. `PROOT_LOADER`, `PROOT_TMP_DIR`).
+     */
+    suspend fun runViaLinker(
+        pluginId: String,
+        relPath: String,
+        args: List<String> = emptyList(),
+        workDir: File? = null,
+        env: Map<String, String> = emptyMap(),
+    ): Process {
+        PluginHost.requireCapability(FfiCapability.EXEC, pluginId)
+        val binary = pluginBinaryPath(pluginId, relPath)
+            ?: throw IllegalArgumentException("插件二进制不存在: $pluginId/$relPath")
+        // system_linker_exec：argv[0]=linker，argv[1]=目标二进制（链接器直接调用约定）。
+        val command = mutableListOf(linkerPath, binary.absolutePath)
+        command += args
+        val builder = ProcessBuilder(command)
+        workDir?.let { builder.directory(it) }
+        if (env.isNotEmpty()) builder.environment().putAll(env)
+        return builder.start()
+    }
+
+    /** Resolves a binary anywhere within the plugin dir (traversal-safe), or null. */
+    fun pluginBinaryPath(pluginId: String, relPath: String): File? {
+        if (relPath.isEmpty()) return null
+        val base = InstallExecutor(application).pluginDir(pluginId).canonicalFile
+        val candidate = File(base, relPath).canonicalFile
+        // 规范化后必须仍在本插件目录内：杜绝 `../` 逃逸到其它插件 / 宿主文件。
+        if (!candidate.path.startsWith(base.path + File.separator)) return null
+        return candidate.takeIf { it.isFile }
+    }
+
+    /** System dynamic linker for system_linker_exec, matching process bitness. */
+    private val linkerPath: String
+        get() = if (android.os.Process.is64Bit()) "/system/bin/linker64" else "/system/bin/linker"
+
+    /**
+     * 通用「插件原生可执行文件托管」管线（运行时定位）：返回插件声明的原生可执行
+     * 文件在宿主 `nativeLibraryDir`（全体系唯一可 execve 处）的路径。
+     *
+     * 构建期插件经 `pluginPack.nativeExecutables` 声明、由宿主 `jasmine.plugin-dev`
+     * 管线并入宿主 jniLibs，安装后落 nativeLibraryDir。文件名约定
+     * `lib<pluginId>.<name>.so`：pluginId 即插件 namespace，name 为声明文件的
+     * 不含扩展名的基名（与构建期重命名一致）。产物归插件，框架只提供定位能力，
+     * 不打包任何插件专属产物。
+     *
+     * @param name 声明文件的基名（不含扩展名），如声明 `loader`/`loader.so` 则传 `loader`。
+     * @return nativeLibraryDir 中的文件；插件未声明或宿主未并入时返回 null。
+     */
+    fun nativeExecutablePath(pluginId: String, name: String): File? {
+        if (pluginId.isEmpty() || name.isEmpty()) return null
+        val dir = File(application.applicationInfo.nativeLibraryDir)
+        val candidate = File(dir, "lib$pluginId.$name.so")
+        return candidate.takeIf { it.isFile }
+    }
+
+    /**
      * Whether the dlopen-based exec bridge is available — true once
      * `libexecbridge.so` loads and its probe answers (bionic linker supports
      * PIE dlopen).

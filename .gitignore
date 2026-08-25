@@ -40,3 +40,7 @@ ComboLite/
 OpenMinis/
 kotlin-sdk/
 调试日志/
+
+# PRoot 研究克隆（OpenMinis 实际使用的 fork 及其 termux 上游，只读参考）
+proot-openminis/
+proot-termux/

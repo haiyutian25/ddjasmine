@@ -28,7 +28,7 @@ plugins {
 // Development/发布态插件分发：sample-plugin 经 pack 管线产出的插件 APK
 // 由 plugin-dev 生成式注入 assets/plugins（构建产物，不落源码树）。
 pluginDev {
-    packModules.set(listOf(":sample-plugin", ":sample-guide", ":sample-example", ":sample-mcp"))
+    packModules.set(listOf(":sample-plugin", ":sample-guide", ":sample-example", ":sample-mcp", ":sample-proot-probe"))
 }
 
 android {
@@ -84,6 +84,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        // 探针 A（nativeLibraryDir execve）地基：让 jniLibs 真实提取到磁盘
+        // （等效 extractNativeLibs=true），极小静态 PIE 才能被 execve。
+        // proot runner 后续同样依赖此落点。
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 
     sourceSets {
@@ -111,7 +117,7 @@ ksp {
 // 由此 task 扫描所有插件模块的 manifest 并合并进宿主（无需宿主/框架预声明
 // 权限池）。插件自主声明、构建期自动生效。
 // ---------------------------------------------------------------------------
-val pluginModules = listOf(":sample-plugin", ":sample-guide", ":sample-example", ":sample-mcp")
+val pluginModules = listOf(":sample-plugin", ":sample-guide", ":sample-example", ":sample-mcp", ":sample-proot-probe")
 
 val generatePluginPermissions by tasks.registering {
     group = "build"

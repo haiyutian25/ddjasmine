@@ -8,6 +8,7 @@ import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
+import org.gradle.api.provider.MapProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
@@ -62,10 +63,18 @@ abstract class PluginPackExtension {
     @get:Input
     abstract val hostProject: Property<String>
 
+    /** 插件声明的原生可执行文件（通用托管管线）：ABI → 相对模块目录的文件路径。
+     *  产物归插件所有；构建期由宿主侧 plugin-dev 管线并入宿主 jniLibs，安装后落
+     *  nativeLibraryDir（全体系唯一可 execve 处），运行时经框架 API 定位。
+     *  框架本身不打包任何插件专属产物。 */
+    @get:Input
+    abstract val nativeExecutables: MapProperty<String, String>
+
     init {
         packageIdSlot.convention(1)
         excludeGroups.convention(listOf("org.jetbrains.kotlin", "androidx"))
         hostProject.convention(":app")
+        nativeExecutables.convention(emptyMap())
         keystorePath.convention(
             File(System.getProperty("user.home"), ".android/debug.keystore").absolutePath,
         )
@@ -104,6 +113,18 @@ abstract class PluginPackagingTask : DefaultTask() {
 
     @get:OutputDirectory
     abstract val outputDir: DirectoryProperty
+
+    /** 插件 namespace（包名，即运行时插件 ID）：托管原生可执行文件名的前缀，防多插件同名冲突。 */
+    @get:Input
+    abstract val pluginNamespace: Property<String>
+
+    /** 插件声明的原生可执行文件：ABI → 相对模块目录路径。 */
+    @get:Input
+    abstract val nativeExecutables: MapProperty<String, String>
+
+    /** 插件模块目录：解析 nativeExecutables 相对路径。 */
+    @get:Internal
+    abstract val moduleDir: DirectoryProperty
 
     private fun isWindows() = System.getProperty("os.name").lowercase().contains("win")
 
@@ -271,6 +292,24 @@ abstract class PluginPackagingTask : DefaultTask() {
             workDir,
         )
         logger.lifecycle("插件包已生成: ${signedApk.absolutePath} (package-id $packageId)")
+
+        // 7. 通用原生可执行文件托管：把插件声明的原生可执行文件拷到
+        //    outputs/plugin/native-executables/<abi>/lib<namespace>.<name>.so，
+        //    交由宿主侧 plugin-dev 管线并入宿主 jniLibs（安装后落 nativeLibraryDir，
+        //    全体系唯一可 execve 处）。产物归插件，框架不打包任何插件专属产物。
+        val nativeExes = nativeExecutables.get()
+        if (nativeExes.isNotEmpty()) {
+            val ns = pluginNamespace.get()
+            val nativeOutRoot = File(outputDir.get().asFile, "native-executables")
+            for ((abi, relPath) in nativeExes) {
+                val source = File(moduleDir.get().asFile, relPath)
+                check(source.exists()) { "原生可执行文件不存在: $source (abi=$abi, plugin=$ns)" }
+                val destDir = File(nativeOutRoot, abi).apply { mkdirs() }
+                val dest = File(destDir, "lib$ns.${source.nameWithoutExtension}.so")
+                source.copyTo(dest, overwrite = true)
+                logger.lifecycle("托管插件原生可执行文件: $abi/${dest.name} <- $source")
+            }
+        }
     }
 
     private fun appendToZip(zipFile: File, entry: File, entryName: String) {
@@ -352,6 +391,17 @@ class PluginPackPlugin : Plugin<Project> {
                 keyAlias.set(extension.keyAlias)
                 keyPassword.set(extension.keyPassword)
                 outputDir.set(project.layout.buildDirectory.dir("outputs/plugin"))
+                // 通用原生可执行文件托管：namespace 作为文件名前缀（防冲突），
+                // 运行时插件 ID 即 namespace，二者据此拼回 nativeLibraryDir 路径。
+                pluginNamespace.set(
+                    project.provider {
+                        project.extensions
+                            .getByType(com.android.build.api.dsl.LibraryExtension::class.java)
+                            .namespace ?: project.name
+                    },
+                )
+                nativeExecutables.set(extension.nativeExecutables)
+                moduleDir.set(project.layout.projectDirectory)
                 dependsOn("bundleReleaseAar")
             }
         }

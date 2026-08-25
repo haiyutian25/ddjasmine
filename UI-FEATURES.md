@@ -20,9 +20,6 @@
 
 | # | 功能 | 对标 | UI 内容 | 优先级 |
 |---|---|---|---|---|
-| 2.1 | 模型管理 | ui-settings-models / llm-deepseek / llm-pi-ai / agent-default-model | API Key（Keystore）、baseURL、模型列表增删、默认模型、推理强度 | P0 |
-| 2.2 | 凭证管理 | credentials | 托管凭证查看/编辑 | P0 |
-| 2.3 | MCP 服务器管理 | dsh-mcp-client（无对标，全新建） | 增删改服务器（名称/URL/headers/超时/重连）、连接状态、`mcp__*` 工具清单 | P0 |
 | 2.4 | 权限预设 | ui-permission-presets / permission | 三档选择 + 各档说明 | P0 |
 | 2.5 | 通用设置 | ui-settings-general / settings | 结构化表单；各插件 settings 命名空间卡片 | P1 |
 | 2.6 | Agent 预设 | ui-agent-preset / system-prompt / agent-loop | persona 文案、agents 配置、系统提示段查看 | P1 |
@@ -41,7 +38,6 @@
 
 | # | 功能 | 对标 | UI 内容 | 优先级 |
 |---|---|---|---|---|
-| 4.1 | 流式回复气泡 | llm-deepseek 流式 + ui-conversation | 逐字流式渲染（M3） | P0 |
 | 4.2 | 工具调用卡片 | ui-tool / ui-renderer | tool/call、tool/result 事件卡片（参数/结果/耗时/状态） | P0 |
 | 4.3 | 工具结果裁剪折叠 | tool-result-pruner | "已裁剪"折叠卡片可展开 | P1 |
 | 4.4 | 文件引用跳转 | ui-reference / tool-fs | 回复内文件路径可点击/预览 | P2 |
@@ -87,7 +83,6 @@
 |---|---|---|---|
 | 7.1 | 权限请求页 | 存储(SAF)/通知/麦克风权限引导与说明 | P0 |
 | 7.2 | 工作目录授权 | SAF 目录选择、授权状态显示 | P0 |
-| 7.3 | 语音输入 | Android 语音识别接入输入框 | P3 |
 | 7.4 | 分享/深链 | 接收系统分享进会话 | P3 |
 | 7.5 | 存储占用管理 | 会话/附件/插件占用统计与清理 | P2 |
 
