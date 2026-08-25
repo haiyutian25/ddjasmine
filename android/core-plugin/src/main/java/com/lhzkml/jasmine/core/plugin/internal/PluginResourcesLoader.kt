@@ -37,11 +37,21 @@ internal object PluginResourcesLoader {
                 File(apkPath),
                 ParcelFileDescriptor.MODE_READ_ONLY,
             )
-            provider = ResourcesProvider.loadFromApk(fd, PluginAssetsProvider(File(apkPath)))
+            // loadFromApk 成功才接管 fd；抛异常时必须自行关闭，否则泄漏。
+            provider = try {
+                ResourcesProvider.loadFromApk(fd, PluginAssetsProvider(File(apkPath)))
+            } catch (e: Throwable) {
+                runCatching { fd.close() }
+                throw e
+            }
             loader.addProvider(provider)
             resources.addLoaders(loader)
         } else {
-            addAssetPath(assets, apkPath)
+            // addAssetPath 返回 0 表示添加失败：不抛错会让插件资源静默缺失、
+            // 运行时才以 NotFoundException 爆发且难以归因。
+            if (addAssetPath(assets, apkPath) == 0) {
+                throw IllegalStateException("addAssetPath 失败，插件资源不可用: $apkPath")
+            }
         }
         return LoadedResources(resources, provider)
     }
@@ -60,12 +70,12 @@ internal object PluginResourcesLoader {
         return assets
     }
 
+    /** 返回 cookie（0 = 添加失败）。 */
     @SuppressLint("DiscouragedPrivateApi", "PrivateApi")
-    private fun addAssetPath(assets: AssetManager, path: String) {
+    private fun addAssetPath(assets: AssetManager, path: String): Int =
         AssetManager::class.java
             .getMethod("addAssetPath", String::class.java)
-            .invoke(assets, path)
-    }
+            .invoke(assets, path) as? Int ?: 0
 }
 
 /** 插件资源及其释放句柄：卸载时 [close] 释放 PFD 与 AssetManager。 */
@@ -95,6 +105,9 @@ internal class PluginAssetsProvider(
     private val cacheDir: File =
         File(packageFile.parentFile, "assets-cache").apply { mkdirs() }
 
+    // 按 path 的提取锁：并发首次请求同一资产时串行化，避免互相覆盖/撕裂。
+    private val extractionLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
     override fun loadAssetFd(path: String, accessMode: Int): android.content.res.AssetFileDescriptor? =
         runCatching {
             ZipFile(packageFile).use { zip ->
@@ -103,15 +116,31 @@ internal class PluginAssetsProvider(
                 // `a/b` 与 `a_b` 落到同一文件名，同大小时互相覆盖、读到错误资源。
                 val out = File(cacheDir, "${sha256(path)}.${entry.size}")
                 if (!out.exists() || out.length() != entry.size) {
-                    zip.getInputStream(entry).use { input ->
-                        FileOutputStream(out).use { output -> input.copyTo(output) }
+                    val lock = extractionLocks.computeIfAbsent(path) { Any() }
+                    synchronized(lock) {
+                        if (!out.exists() || out.length() != entry.size) {
+                            // 先写临时文件再原子 rename：并发提取不会互相截断，
+                            // 也不会出现"内容与声明大小不符"的撕裂文件。
+                            val tmp = File(cacheDir, "${out.name}.tmp-${Thread.currentThread().id}")
+                            zip.getInputStream(entry).use { input ->
+                                FileOutputStream(tmp).use { output -> input.copyTo(output) }
+                            }
+                            if (!tmp.renameTo(out)) {
+                                tmp.copyTo(out, overwrite = true)
+                                tmp.delete()
+                            }
+                            enforceQuota()
+                        }
                     }
-                    enforceQuota()
                 }
                 val fd = ParcelFileDescriptor.open(out, ParcelFileDescriptor.MODE_READ_ONLY)
                 android.content.res.AssetFileDescriptor(fd, 0, entry.size)
             }
-        }.getOrNull()
+        }.getOrElse { e ->
+            // 不再静默吞掉（含磁盘满/OOM）：记录真实原因，资产缺失才返回 null。
+            android.util.Log.w("PluginAssetsProvider", "提取插件资产失败: $path", e)
+            null
+        }
 
     private fun sha256(s: String): String =
         java.security.MessageDigest.getInstance("SHA-256")

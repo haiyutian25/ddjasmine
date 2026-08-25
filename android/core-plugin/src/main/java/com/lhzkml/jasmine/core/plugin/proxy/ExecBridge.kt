@@ -25,7 +25,13 @@ class ExecBridge(private val application: Application) {
 
     /** Absolute path of an extracted executable asset, or null when absent. */
     fun executablePath(pluginId: String, name: String): File? {
-        val candidate = File(InstallExecutor(application).execDir(pluginId), name)
+        if (name.isEmpty()) return null
+        val base = InstallExecutor(application).execDir(pluginId).canonicalFile
+        val candidate = File(base, name).canonicalFile
+        // 规范化后必须仍在本插件 execDir 内：杜绝 `../` 逃逸到其它插件的
+        // native 库 / base.apk / 任意沙箱文件（runNative 走 dlopen 不受 noexec
+        // 限制，逃逸即可加载任意可读文件）。
+        if (!candidate.path.startsWith(base.path + File.separator)) return null
         return candidate.takeIf { it.isFile }
     }
 

@@ -48,13 +48,17 @@ object RemoteServices {
         val app = ProcessIsolationManager.application()
         if (app != null && ProcessIdentity.isIsolatedProcess(app)) {
             // 隔离进程：经宿主注册进来的目录 binder 解析宿主发布的远程服务。
+            // 宿主目录 binder 可能已死（宿主重启），transact 兜住。
             val hostDir = PluginProcessBridge.local.resolve(PluginProcessBridge.HOST_DIRECTORY_KEY)
-            hostDir?.let { PluginProcessBridge.wrap(it)?.resolve(key.name)?.let { r -> return r } }
+            hostDir?.let {
+                runCatching { PluginProcessBridge.wrap(it)?.resolve(key.name) }.getOrNull()
+                    ?.let { r -> return r }
+            }
             return null
         }
-        // 宿主进程：经各槽 bridge 解析隔离进程发布的远程服务。
+        // 宿主进程：经各槽 bridge 解析隔离进程发布的远程服务。死桥兜住。
         for (bridge in ProcessIsolationManager.bridges()) {
-            bridge.resolve(key.name)?.let { return it }
+            runCatching { bridge.resolve(key.name) }.getOrNull()?.let { return it }
         }
         return null
     }

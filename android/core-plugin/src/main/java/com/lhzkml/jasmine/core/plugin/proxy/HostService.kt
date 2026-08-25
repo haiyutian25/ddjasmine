@@ -14,6 +14,8 @@ import com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager
 import com.lhzkml.jasmine.core.plugin.rust.FfiLocateOutcome
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Proxy-service pool. The host registers a fixed set of manifest-declared
@@ -76,11 +78,13 @@ object ServiceProxyPool {
                 }
                 return instanceId to proxy
             }
-            // 宿主进程：经 bridge 到隔离进程分配。
+            // 宿主进程：经 bridge 到隔离进程分配。死桥（隔离进程刚崩溃）的
+            // transact 会抛 DeadObjectException，兜住后按"分配失败"优雅返回。
             val bridge = ProcessIsolationManager.bridgeFor(slot) ?: return null
-            val proxyName = bridge.acquireServiceSlot(instanceId) ?: return null
+            val proxyName = runCatching { bridge.acquireServiceSlot(instanceId) }.getOrNull()
+                ?: return null
             val proxy = isolatedProxyClassOf(proxyName) ?: run {
-                bridge.releaseServiceSlot(instanceId)
+                runCatching { bridge.releaseServiceSlot(instanceId) }
                 return null
             }
             return instanceId to proxy
@@ -105,7 +109,12 @@ object ServiceProxyPool {
         if (ProcessIdentity.isIsolatedProcess(app)) {
             PluginProcessBridge.servicePool.release(instanceId)
         } else {
-            ProcessIsolationManager.bridges().forEach { it.releaseServiceSlot(instanceId) }
+            // 每个 bridge 独立兜住：某个隔离进程刚崩溃时其 binder 已死，
+            // transact 抛 DeadObjectException，不能中断循环（否则真正持槽的
+            // 存活进程收不到 release），也不能顶替调用方的原始异常。
+            ProcessIsolationManager.bridges().forEach { bridge ->
+                runCatching { bridge.releaseServiceSlot(instanceId) }
+            }
         }
     }
 
@@ -122,7 +131,7 @@ object ServiceProxyPool {
             return isolatedProxyClassOf(name)
         }
         for (bridge in ProcessIsolationManager.bridges()) {
-            val name = bridge.serviceProxyClass(instanceId)
+            val name = runCatching { bridge.serviceProxyClass(instanceId) }.getOrNull()
             if (name != null) return isolatedProxyClassOf(name)
         }
         return null
@@ -184,6 +193,13 @@ open class HostService : Service() {
             // 也必须归还，否则池槽位永久泄漏（此前在实例化成功之后才赋值，
             // 失败路径拿不到 id，onDestroy 跳过 release）。
             instanceId = intent?.getStringExtra(ProxyKeys.SERVICE_INSTANCE_ID)
+            // 隔离进程的 PluginHost 是异步初始化：池服务可能在初始化完成前就被
+            // 宿主启动，此时 locateClass 因 coreHandle 未就绪而失败、服务静默
+            // 死亡而调用方已得 true。先等待就绪（隔离进程 initialize 只开账本、
+            // 很快；超时则走下方失败路径优雅停止）。
+            if (!PluginHost.isInitialized) {
+                runBlocking { withTimeoutOrNull(5_000) { PluginHost.awaitReady() } }
+            }
             try {
                 val pluginId = when (
                     val outcome = PluginHost.coreHandle.locateClass(className.orEmpty(), null)

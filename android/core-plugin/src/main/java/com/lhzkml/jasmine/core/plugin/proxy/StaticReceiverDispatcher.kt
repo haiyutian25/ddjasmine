@@ -69,7 +69,11 @@ object StaticReceiverDispatcher {
             }
         }
         val filter = IntentFilter().apply { actions.forEach { addAction(it) } }
-        ContextCompat.registerReceiver(app, r, filter, ContextCompat.RECEIVER_EXPORTED)
+        // RECEIVER_NOT_EXPORTED：插件自定义 action 只接受同应用广播。此前
+        // RECEIVER_EXPORTED + HostReceiver 用攻击者可控的 intent.package 判
+        // "内部"，第三方可 setPackage(宿主) 伪造内部广播触达 exported=false
+        // 的插件接收器。与 manifest HostReceiver(exported=false) 的安全默认一致。
+        ContextCompat.registerReceiver(app, r, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         receiver = r
     }
 }

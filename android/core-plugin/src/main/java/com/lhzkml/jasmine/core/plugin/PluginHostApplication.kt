@@ -44,6 +44,8 @@ open class PluginHostApplication : Application() {
         PluginHost.crashMarkerDir = crashDir
         ServiceProxyPool.configure(this, defaultServicePool)
         ServiceProxyPool.configureIsolated(isolatedServicePool)
+        // offload socket 名按包名隔离（每个进程都要设置，含隔离进程）。
+        com.lhzkml.jasmine.core.plugin.process.OffloadDispatcher.configure(packageName)
         ProcessIsolationManager.attach(this)
         // 崩溃熔断：读取上次崩溃归因产生的标记，本次启动跳过这些插件，
         // 避免反复崩溃拖垮宿主。

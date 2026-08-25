@@ -516,6 +516,10 @@ object PluginHost {
         mutex.withLock {
             val lc = requireLifecycle()
             if (lc.isLoaded(pluginId)) lc.unload(pluginId)
+            // 回收隔离进程：此前只卸宿主 UI 伴侣，隔离进程里的主入口副本继续
+            // 运行（ClassLoader 指向即将删除的 payload）、服务存活、槽位与
+            // isolated_plugins.json 不清理——"双活"在卸载路径复活。
+            com.lhzkml.jasmine.core.plugin.process.ProcessIsolationManager.release(pluginId)
             val record = requireCore().commitUninstall(pluginId)
             File(record.installPath).deleteRecursively()
             grantDb?.pluginGrantDao()?.deleteByPlugin(pluginId)

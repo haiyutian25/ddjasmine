@@ -14,7 +14,6 @@ import com.lhzkml.jasmine.core.plugin.AuthorizationHandler
 import com.lhzkml.jasmine.core.plugin.AuthorizationPrompt
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.Continuation
 
 /**
@@ -81,7 +80,10 @@ class DefaultPluginAuthorizationHandler(
     private val application: Application,
 ) : AuthorizationHandler {
 
-    private val nextCode = AtomicInteger(1)
+    // 授权 token 用 SecureRandom 而非顺序递增：插件与宿主同进程，顺序码可被
+    // 枚举伪造（广播 granted=true + code=1..N 批量批准挂起授权）。随机 32 位
+    // token 使盲猜不可行；接收器又是 RECEIVER_NOT_EXPORTED，跨应用亦被挡。
+    private val secureRandom = java.security.SecureRandom()
     private val pending = ConcurrentHashMap<Int, Continuation<Boolean>>()
 
     private val receiver = object : BroadcastReceiver() {
@@ -106,7 +108,7 @@ class DefaultPluginAuthorizationHandler(
 
     override suspend fun onAuthorization(prompt: AuthorizationPrompt): Boolean =
         suspendCancellableCoroutine { continuation ->
-            val code = nextCode.getAndIncrement()
+            val code = secureRandom.nextInt()
             pending[code] = continuation
             continuation.invokeOnCancellation { pending.remove(code) }
             application.startActivity(

@@ -34,8 +34,21 @@ fun interface OffloadHandler {
 
 object OffloadDispatcher {
 
+    /**
+     * 宿主包名（每个进程在 PluginHostApplication.onCreate 经 [configure] 设置）。
+     * abstract socket 名是全网络命名空间共享的，拼入包名后同设备多个宿主不会
+     * 抢绑/互相劫持（此前固定名 "jasmine-offload" 是全局常量）。
+     */
+    @Volatile
+    private var appPackageName: String = ""
+
+    /** 每个进程初始化时调用，使 socket 名按应用隔离。 */
+    fun configure(packageName: String) {
+        appPackageName = packageName
+    }
+
     /** Abstract socket name the host serves offload requests on. */
-    const val SOCKET_NAME = "jasmine-offload"
+    private fun socketName(): String = "jasmine-offload.$appPackageName"
 
     private val handlers = ConcurrentHashMap<String, OffloadHandler>()
 
@@ -58,13 +71,13 @@ object OffloadDispatcher {
     fun registeredNames(): List<String> = handlers.keys().toList().sorted()
 
     /**
-     * Starts the offload server on [SOCKET_NAME] (host side). Requests routed
-     * here resolve the command name against [handlers]. Idempotent.
+     * Starts the offload server on the per-package socket name (host side).
+     * Requests routed here resolve the command name against [handlers]. Idempotent.
      */
     @Synchronized
     fun startServer() {
         if (server != null) return
-        val s = AbstractSocketChannel.Server(SOCKET_NAME)
+        val s = AbstractSocketChannel.Server(socketName())
         s.start { requestBytes ->
             runCatching { dispatchRequestBytes(requestBytes) }
                 .getOrElse { e ->
@@ -101,7 +114,7 @@ object OffloadDispatcher {
             OffloadRequest.serializer(),
             OffloadRequest(argv = argv, env = env),
         ).encodeToByteArray()
-        val responseBytes = AbstractSocketChannel.Client(SOCKET_NAME).request(requestBytes)
+        val responseBytes = AbstractSocketChannel.Client(socketName()).request(requestBytes)
         return json.decodeFromString(
             OffloadResult.serializer(),
             responseBytes.decodeToString(),

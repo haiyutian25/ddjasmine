@@ -207,6 +207,11 @@ class PluginProcessBridge private constructor(
                 poolAvailable.addAll(classNames)
             }
 
+            // @Synchronized：check(poolActive)→poll→登记 三步必须原子。两条并发
+            // 入口（宿主经 Binder 的 TX_ACQUIRE_SLOT、隔离进程内本地 acquire）
+            // 都落在同一 serverInstance 上，此前非原子会让同 instanceId 双方各
+            // poll 走一个代理类、后写覆盖前者 → 先分配的代理类永久泄漏。
+            @Synchronized
             fun acquireServiceSlotLocal(instanceId: String): String? {
                 poolActive[instanceId]?.let { return it }
                 return poolAvailable.poll()?.also { poolActive[instanceId] = it }
@@ -234,9 +239,13 @@ class PluginProcessBridge private constructor(
                 when (code) {
                     TX_REGISTER -> {
                         data.enforceInterface(DESCRIPTOR)
-                        val name = data.readString() ?: ""
+                        val name = data.readString()
                         val token = data.readStrongBinder()
-                        put(name, token)
+                        // 服务端不信任入站 Parcel：null binder 会让 ConcurrentHashMap
+                        // 抛 NPE、空名会污染目录，均直接拒绝。
+                        if (!name.isNullOrEmpty() && token != null) {
+                            put(name, token)
+                        }
                         reply?.writeNoException()
                         return true
                     }

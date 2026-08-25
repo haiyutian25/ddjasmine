@@ -183,7 +183,10 @@ internal class InstallExecutor(private val context: Context) {
      * in preference order so the class loader can fall back down the list.
      */
     private fun extractNativeLibraries(apk: File, libDir: File) {
-        val abis = Build.SUPPORTED_ABIS ?: return
+        // 按「当前进程位宽」过滤，而非设备 SUPPORTED_ABIS 全量：32 位宿主进程
+        // 在 64 位设备上若按设备序先命中 arm64-v8a，会提取 64 位 .so 导致
+        // System.loadLibrary 抛 UnsatisfiedLinkError（包内本有可用 32 位库）。
+        val abis = (Build.SUPPORTED_ABIS ?: return).filter { abiMatchesProcessBitness(it) }
         ZipFile(apk).use { zip ->
             for (abi in abis) {
                 val prefix = "lib/$abi/"
@@ -202,6 +205,12 @@ internal class InstallExecutor(private val context: Context) {
                 return // best ABI only; the rest stay in the package
             }
         }
+    }
+
+    /** ABI 是否与当前进程位宽一致（避免 32 位进程提取 64 位 .so）。 */
+    private fun abiMatchesProcessBitness(abi: String): Boolean {
+        val is64Abi = abi.contains("arm64") || abi.endsWith("x86_64") || abi.contains("mips64")
+        return is64Abi == android.os.Process.is64Bit()
     }
 
     /**
