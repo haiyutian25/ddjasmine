@@ -134,7 +134,8 @@ PRoot 给 tracee 装 seccomp BPF 加速（`src/tracee/seccomp.c`），可用 `PR
 
 > 缺口 1 **不用探**（源码已确认必挂），但它把"loader 必须走 nativeLibraryDir + `PROOT_LOADER`"升级为硬约束。缺口 2/3（+可选 4）由新探针 A/B/C 实证。
 
-### 4.5.1 P0.75 探针已实现并真机验证（执行底座归框架）
+### 4.5.1 P0.75 探针已实现并真机验证（执行底座经框架通用管线托管）
+== PRoot 插件探针（插件目录）==dir: /data/user/0/com.lhzkml.jasmine/files/plugins/jasmine.sample.prootprobe[DENIED] execve（proot/loader 直接执行）: exec 抛异常: IOException: Cannot run program "/data/user/0/com.lhzkml.jasmine/files/plugins/jasmine.sample.prootprobe/probe_sh": error=13, Permission denied[OK] mmap PROT_EXEC（guest 装载路径）: 可执行（返回 42）[DENIED] memfd+fexecve（proot/loader 出路·生死线）: execl 失败 errno=13（EACCES，多为 SELinux 拒绝）结论: mmap 放行但 memfd 被拒 → guest 可装载，但 proot/loader 无出路，需框架侧 runner== 地基探针 A/B/C（PRoot 专属链路，缺口 §4.5）==nativeLibraryDir: /data/app/~~X_B7hiYTXSIsYwkiF5ncUQ==/com.lhzkml.jasmine-ZZnJu5rg5iIaP8_yzrH4Bw==/lib/arm64[OK] A. nativeLibraryDir execve: 放行（PIE 退出 42）→ proot/loader 可落 nativeLibraryDir[OK] B. ptrace 子进程（TRACEME+GETREGSET+CONT）: 全链路可用（附着+读寄存器+继续）→ PRoot 命脉 OK[OK] C. seccomp BPF 安装: 可安装 seccomp 过滤 → PRoot 加速可用[OK] D. system_linker_exec（插件目录动态二进制经 linker64）: 可经 linker64 装载运行 → 框架 runner 能用 system_linker_exec，proot 可留插件目录[OK] E. ProcessBuilder+linker64（框架 runViaLinker 同机制）: ProcessBuilder+linker64 可用 → 框架 runViaLinker 能把插件目录 proot 起为子进程地基结论: nativeLibraryDir execve 与 ptrace 均放行 → P1（proot runner）地基成立；seccomp 可用（加速）增强方向: system_linker_exec 成立（native 与 ProcessBuilder 双路皆绿）→ 框架 ExecBridge.runViaLinker 可用，proot 本体可留插件（仅 loader 仍需执行底座 nativeLibraryDir）
 
 地基与探针均已落码并打包（执行底座 PIE 归**探针插件**，经框架通用托管管线运行时并入应用 APK）：
 
