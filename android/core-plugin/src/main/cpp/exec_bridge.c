@@ -705,7 +705,7 @@ Java_com_lhzkml_jasmine_core_plugin_proxy_ExecBridge_nativeSpawn(
     JNIEnv *env, jobject thiz,
     jstring linkerPath, jstring binaryPath, jobjectArray args,
     jobjectArray envPairs, jstring workDir,
-    jintArray rlimits, jintArray fdsOut) {
+    jlongArray rlimits, jintArray fdsOut) {
     (void)thiz;
 
     /* ── 1. 提取 JNI 字符串与数组（fork 前完成）── */
@@ -746,9 +746,9 @@ Java_com_lhzkml_jasmine_core_plugin_proxy_ExecBridge_nativeSpawn(
     jsize rl_count = rlimits ? (*env)->GetArrayLength(env, rlimits) : 0;
     /* 必须是 3 的倍数。 */
     int n_rl = (int)(rl_count / 3);
-    jint *rl_data = NULL;
+    jlong *rl_data = NULL;
     if (rl_count > 0) {
-        rl_data = (*env)->GetIntArrayElements(env, rlimits, NULL);
+        rl_data = (*env)->GetLongArrayElements(env, rlimits, NULL);
     }
 
     /* ── 3. 创建 3 对管道 ── */
@@ -821,7 +821,7 @@ Java_com_lhzkml_jasmine_core_plugin_proxy_ExecBridge_nativeSpawn(
     free(argv);
     for (int i = 0; envp[i]; i++) free(envp[i]);
     free(envp);
-    if (rl_data) (*env)->ReleaseIntArrayElements(env, rlimits, rl_data, JNI_ABORT);
+    if (rl_data) (*env)->ReleaseLongArrayElements(env, rlimits, rl_data, JNI_ABORT);
 
     /* 输出父端管道 fd：[0]=stdin 写、[1]=stdout 读、[2]=stderr 读。 */
     jint fds[3] = { (jint)stdin_pipe[1], (jint)stdout_pipe[0], (jint)stderr_pipe[0] };

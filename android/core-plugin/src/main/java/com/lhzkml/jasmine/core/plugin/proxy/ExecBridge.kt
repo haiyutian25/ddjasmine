@@ -113,6 +113,7 @@ class ExecBridge(private val application: Application) {
         args: List<String> = emptyList(),
         workDir: File? = null,
         env: Map<String, String> = emptyMap(),
+        isolateEnv: Boolean = false,
     ): Process {
         PluginHost.requireCapability(FfiCapability.EXEC, pluginId)
         val binary = pluginBinaryPath(pluginId, relPath)
@@ -122,6 +123,12 @@ class ExecBridge(private val application: Application) {
         command += args
         val builder = ProcessBuilder(command)
         workDir?.let { builder.directory(it) }
+        // E8：isolateEnv=true 时清空继承的宿主环境（`env -i` 等效），只保留显式提供的
+        // env。防止 LD_PRELOAD/BOOTCLASSPATH/LD_LIBRARY_PATH 等宿主变量泄漏进 guest
+        // 污染 glibc 程序（如 Node.js os.networkInterfaces 崩溃）。
+        if (isolateEnv) {
+            builder.environment().clear()
+        }
         // E1：LD_LIBRARY_PATH 自动注入——链接器搜索序为 DT_RUNPATH → LD_LIBRARY_PATH →
         // app nativeLibraryDir → 系统目录，不搜索二进制自身目录。插件未显式提供时，
         // 自动注入 nativeLibraryDir + 插件 lib/<abi> 目录，确保动态链接依赖可解析。
@@ -301,7 +308,17 @@ class ExecBridge(private val application: Application) {
                 "settings_enable_monitor_phantom_procs",
                 1, // 默认启用
             )
-            if (value == 0) PhantomKillerStatus.DISABLED else PhantomKillerStatus.ENABLED
+            val status = if (value == 0) PhantomKillerStatus.DISABLED else PhantomKillerStatus.ENABLED
+            // E7：启用时主动警告——PRoot tracee 树极易触发幻影进程杀手，
+            // 子进程被 signal 9 静默杀死、极难诊断。
+            if (status == PhantomKillerStatus.ENABLED) {
+                android.util.Log.w(
+                    "ExecBridge",
+                    "E7: 幻影进程杀手已启用。PRoot 等多子进程负载可能被系统静默杀死（signal 9）。" +
+                        "缓解: adb shell settings put global settings_enable_monitor_phantom_procs false",
+                )
+            }
+            status
         } catch (_: Throwable) {
             PhantomKillerStatus.UNKNOWN
         }
@@ -514,11 +531,12 @@ class ExecBridge(private val application: Application) {
         } else env
         val envPairs = fullEnv.map { (k, v) -> "$k=$v" }.toTypedArray()
         // rlimits 扁平化为 [resource, soft, hard] 三元组。
-        val rlFlat = IntArray(rlimits.size * 3)
+        // 用 LongArray：rlim_t 为 64 位，Int 会截断大值（如 RLIMIT_AS 数 GB）与 RLIM_INFINITY。
+        val rlFlat = LongArray(rlimits.size * 3)
         rlimits.forEachIndexed { i, (res, soft, hard) ->
-            rlFlat[i * 3] = res
-            rlFlat[i * 3 + 1] = soft.toInt()
-            rlFlat[i * 3 + 2] = hard.toInt()
+            rlFlat[i * 3] = res.toLong()
+            rlFlat[i * 3 + 1] = soft
+            rlFlat[i * 3 + 2] = hard
         }
         val fdsOut = IntArray(3)
         val pid = nativeSpawn(
@@ -558,7 +576,7 @@ class ExecBridge(private val application: Application) {
         args: Array<String>,
         envPairs: Array<String>,
         workDir: String?,
-        rlimits: IntArray,
+        rlimits: LongArray,
         fdsOut: IntArray,
     ): Int
 

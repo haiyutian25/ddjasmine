@@ -68,18 +68,39 @@ class ChildProcessSupervisor(internal val execBridge: ExecBridge) {
                 "插件 ${spec.pluginId} 已达并发子进程上限 ($maxChildrenPerPlugin)"
             )
         }
-        val process = execBridge.runViaLinker(
+        // E6：经 spawnNative 启动——native fork + setsid()，子进程成为新会话/进程组
+        // 首领（pid == pgid），teardown/destroyGracefully 的 killpg 才能杀整个进程组
+        // （含 proot tracee），杜绝孤儿。
+        val process = execBridge.spawnNative(
             pluginId = spec.pluginId,
             relPath = spec.relPath,
             args = spec.args,
             workDir = spec.workDir,
-            env = spec.env,
+            env = buildEnv(spec),
         )
         val managed = ManagedProcess(spec, this)
         managed.attach(process)
         byPlugin.getOrPut(spec.pluginId) { CopyOnWriteArraySet() }.add(managed)
         return managed
     }
+
+    /**
+     * E8：构造子进程环境变量。
+     *
+     * [ExecBridge.spawnNative] 经 `clearenv()` 完全重置环境，需显式提供全部变量：
+     * - [ChildProcessSpec.isolateGuestEnv] = true：仅用插件 [ChildProcessSpec.env]
+     *   （`env -i` 严格隔离，防宿主变量污染 glibc 程序）。
+     * - false：继承宿主环境 + 插件 env（兼容原 runViaLinker 的继承行为）。
+     *
+     * 两种情况都排除宿主的 `LD_LIBRARY_PATH`，交由 [ExecBridge.spawnNative] 自动
+     * 注入正确值（nativeLibraryDir + 插件 lib/<abi>）。
+     */
+    private fun buildEnv(spec: ChildProcessSpec): Map<String, String> =
+        if (spec.isolateGuestEnv) {
+            spec.env
+        } else {
+            System.getenv().filterKeys { it != "LD_LIBRARY_PATH" } + spec.env
+        }
 
     /**
      * E22：按 [mode] 编排启动一组子进程。
@@ -223,12 +244,13 @@ class ChildProcessSupervisor(internal val execBridge: ExecBridge) {
                 delay(delayMs)
                 if (!managed.stopping) {
                     runCatching {
-                        val next = execBridge.runViaLinker(
+                        // E6：重启同样经 spawnNative（setsid），保持进程组语义。
+                        val next = execBridge.spawnNative(
                             pluginId = spec.pluginId,
                             relPath = spec.relPath,
                             args = spec.args,
                             workDir = spec.workDir,
-                            env = spec.env,
+                            env = buildEnv(spec),
                         )
                         managed.attach(next)
                     }.onFailure {
@@ -329,9 +351,13 @@ enum class ChildState { STARTING, RUNNING, RESTARTING, STOPPING, STOPPED }
 enum class GroupMode { SEQUENTIAL, PARALLEL }
 
 /**
- * Handle of one supervised child. After a restart the underlying [Process]
- * changes: re-read [stdin]/[isAlive] from this handle, do not cache the old
- * `Process` object.
+ * Handle of one supervised child. After a restart the underlying
+ * [NativeChildProcess] changes: re-read [stdin]/[isAlive] from this handle,
+ * do not cache the old object.
+ *
+ * 子进程经 [ExecBridge.spawnNative] 启动（native fork + `setsid()`），是新会话/
+ * 进程组首领（pid == pgid）——E6 的 `killpg` 因此能杀整个进程组（含 proot tracee），
+ * 杜绝孤儿。
  *
  * 批次 2 增强：
  * - E5 [signal] / [destroyGracefully]
@@ -345,7 +371,7 @@ class ManagedProcess internal constructor(
 ) {
 
     @Volatile
-    private var process: Process? = null
+    private var process: NativeChildProcess? = null
 
     @Volatile
     private var pumpJob: Job? = null
@@ -376,23 +402,9 @@ class ManagedProcess internal constructor(
     private var stateInternal = ChildState.STARTING
 
     /** E9：当前子进程 PID（-1 表示无活跃进程）。
-     * 反射获取：android.jar 未暴露 `Process.pid()`。 */
+     * [NativeChildProcess] 直接提供；`setsid()` 后 pid == pgid。 */
     val pid: Int
-        get() {
-            val p = process ?: return -1
-            return try {
-                val m = p.javaClass.getMethod("pid")
-                (m.invoke(p) as? Int) ?: -1
-            } catch (_: Throwable) {
-                try {
-                    val f = p.javaClass.getDeclaredField("pid")
-                    f.isAccessible = true
-                    f.getInt(p)
-                } catch (_: Throwable) {
-                    -1
-                }
-            }
-        }
+        get() = process?.pid ?: -1
 
     /** E9：运行时长（毫秒）。 */
     val uptimeMs: Long
@@ -463,30 +475,31 @@ class ManagedProcess internal constructor(
     }
 
     /**
-     * E5：优雅关闭——SIGTERM → 等待 [timeoutMs] → SIGKILL。
-     * E6：使用进程组信号（若可用）。
+     * E5：优雅关闭——进程组 SIGTERM → 等待 [timeoutMs] → 进程组 SIGKILL。
+     * E6：`setsid()` 后 pid == pgid，`killpg` 杀整个进程组（含 proot tracee）。
      */
     fun destroyGracefully(timeoutMs: Long = 5_000L) {
         val p = pid
         if (p <= 0) return
         stateInternal = ChildState.STOPPING
-        // 先发 SIGTERM。
-        supervisor.execBridge.signalPid(p, SIGTERM)
+        // E6：进程组 SIGTERM（含 tracee）。
+        supervisor.execBridge.signalGroup(p, SIGTERM)
         // 等待退出。
         val deadline = System.currentTimeMillis() + timeoutMs
         while (isAlive && System.currentTimeMillis() < deadline) {
             Thread.sleep(50)
         }
-        // 仍存活则强制。
+        // 仍存活则进程组 SIGKILL 强制。
         if (isAlive) {
-            runCatching { process?.destroyForcibly() }
+            supervisor.execBridge.signalGroup(p, SIGKILL)
+            runCatching { process?.destroy() }
         }
     }
 
     // ── 内部生命周期 ─────────────────────────────────────────────────────
 
     /** Binds a freshly started child and launches its output pump + exit watch. */
-    internal fun attach(child: Process) {
+    internal fun attach(child: NativeChildProcess) {
         process = child
         startedAtMs = System.currentTimeMillis()
         lastOutputAtMs = startedAtMs // E14：初始视为有输出
@@ -494,7 +507,8 @@ class ManagedProcess internal constructor(
         pumpJob?.cancel()
         stderrPumpJob?.cancel()
         hangWatchJob?.cancel()
-        // stderr 独立泵：runViaLinker 未设 redirectErrorStream，stderr 管道写满
+        healthCheckJob?.cancel()
+        // stderr 独立泵：spawnNative 的 stderr 独立（未合并），管道写满
         // 会阻塞子进程，必须持续排空。
         stderrPumpJob = drainStream(child.errorStream)
         pumpJob = supervisor.scope.launch {
@@ -596,12 +610,9 @@ class ManagedProcess internal constructor(
         hangWatchJob = null
         healthCheckJob?.cancel() // E23
         healthCheckJob = null
-        // E6：优先杀进程组（防止 tracee 孤儿）。
-        val p = pid
-        if (p > 0) {
-            supervisor.execBridge.signalGroup(p, SIGKILL)
-        }
-        runCatching { process?.destroyForcibly() }
+        // E6：NativeChildProcess.destroy() = 进程组 SIGKILL（setsid 后 pid == pgid，
+        // 含 proot tracee）+ 收割 + 关管道，杜绝孤儿。
+        runCatching { process?.destroy() }
         process = null
     }
 
